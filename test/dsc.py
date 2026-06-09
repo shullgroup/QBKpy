@@ -9,6 +9,7 @@ from scipy.optimize import curve_fit
 
 from .utils import first_line, DEFAULT_CYCLER
 from .graphics import double_headed_arrow, vline
+from .models import fitGaussian as _fit_gauss_gen
 
 def readDSC(path, **kwargs):
     '''
@@ -192,61 +193,122 @@ def plotDSC(df, **kwargs):
 
     return Tg, ax, twin
 
-def fitGaussian(df, ax, **kwargs):
-    # CHANGE THIS TO UTILIZE GENERALIZED fitGaussian FUNCTION IN MODELS
-    '''
-    Fits data to single Gaussian peak and adds to DSC plot
+
+def fitGaussian(df: pd.DataFrame, ax, **kwargs):
+    """
+    Fits DSC derivative data to a single Gaussian peak (for Glass Transition).
+
+    This function utilizes the general `fitGaussian_general` to perform the fitting,
+    providing DSC-specific column names, default bounds, and ensuring a 'min' peak direction.
 
     Parameters
     ----------
     df : pd.DataFrame
         DataFrame containing DSC data.
     ax : mpl.axes.Axes
-        Axes object to plot Gaussian fit on. Typically twin from DSC plot.
+        Axes object to plot Gaussian fit on.
     target_dq : str, default 'dqdT'
         The column name of the derivative data to fit.
-    bounds : tuple, default ([-100,0,0,-1],[200,1,30,1])
-        Bounds for the fitting parameters.
-    guess : list, default Calculated based on peak min
-        Initial guess (p0) for fitting.
+    **kwargs:
+        Additional keyword arguments passed to `fitGaussian_general`.
+        These can include `guess`, `bounds` (to override defaults), `sigma`,
+        `absolute_sigma`, `maxfev`, etc.
 
     Returns
     -------
     Tg : float
-        Glass transition temperature from center of Gaussian fit in deg. C
+        Glass transition temperature from center of Gaussian fit in deg. C.
+        Returns np.nan if fit fails.
     Tg_err : float
-        Uncertainty in Tg fit in deg. C
+        Uncertainty in Tg fit in deg. C. Returns np.nan if fit fails.
     dT : float
-        Breadth of glass transition from width of Gaussian fit in deg. C
+        Breadth of glass transition from width of Gaussian fit in deg. C.
+        Returns np.nan if fit fails.
     dT_err : float
-        Uncertainty in dT fit in deg. C
-    '''
-    target_dq = kwargs.get('target_dq', 'dqdT')
-    bounds = kwargs.get('bounds', ([-100,0,0,-1],[200,1,30,1]))
-
-    # gaussian with baseline y0
-    def Gaussian(x, ctr, amp, wid, y0):
-        return y0 + amp * np.exp(-((x - ctr) / (2 * wid)) ** 2)
-
-    # clean up dataframe a bit
-    df = df.replace([np.inf, -np.inf], np.nan).dropna()
+        Uncertainty in dT fit in deg. C. Returns np.nan if fit fails.
+    """
+    # DSC-specific column names and parameters
+    dsc_x_col = 'temp' 
+    dsc_y_col = kwargs.pop('target_dq', 'dqdT') # 'dqdT' is the default target derivative column
     
-    # find peak in derivative (min because negative usually)
-    peak_idx = df[target_dq].idxmin()
-    guess = kwargs.get('guess', [df.loc[peak_idx, 'temp'], 3e-2, 10, 0])
+    # DSC-specific default bounds (if not provided in kwargs)
+    dsc_bounds = kwargs.pop('bounds', ([-100, 0, 0, -1], [200, 1, 30, 1]))
     
-    try:
-        popt, pcov = curve_fit(Gaussian, df['temp'], -df[target_dq], p0=guess, bounds=bounds)
-        perr = np.sqrt(np.diag(pcov))
+    # Custom plot label formatter for DSC data
+    def dsc_label_formatter(ctr, wid):
+        return f'T$_g = {ctr:0.1f} ^\\circ$C \n $\u03b4T = {wid:0.1f} ^\\circ$C'
+
+    # Call the general fitGaussian function
+    ctr, ctr_err, wid, wid_err = _fit_gauss_gen(
+        df,
+        x_col=dsc_x_col,
+        y_col=dsc_y_col,
+        ax=ax,
+        bounds=dsc_bounds,
+        peak_direction='min', # DSC derivative peaks are typically negative
+        plot_label_formatter=dsc_label_formatter,
+        **kwargs # Pass remaining kwargs like guess, sigma, maxfev etc.
+    )
+
+    # Alias return values for DSC-specific nomenclature
+    Tg, Tg_err, dT, dT_err = ctr, ctr_err, wid, wid_err
+    return Tg, Tg_err, dT, dT_err
+
+# def fitGaussian_old(df, ax, **kwargs):
+#     # CHANGE THIS TO UTILIZE GENERALIZED fitGaussian FUNCTION IN MODELS
+#     '''
+#     Fits data to single Gaussian peak and adds to DSC plot
+
+#     Parameters
+#     ----------
+#     df : pd.DataFrame
+#         DataFrame containing DSC data.
+#     ax : mpl.axes.Axes
+#         Axes object to plot Gaussian fit on. Typically twin from DSC plot.
+#     target_dq : str, default 'dqdT'
+#         The column name of the derivative data to fit.
+#     bounds : tuple, default ([-100,0,0,-1],[200,1,30,1])
+#         Bounds for the fitting parameters.
+#     guess : list, default Calculated based on peak min
+#         Initial guess (p0) for fitting.
+
+#     Returns
+#     -------
+#     Tg : float
+#         Glass transition temperature from center of Gaussian fit in deg. C
+#     Tg_err : float
+#         Uncertainty in Tg fit in deg. C
+#     dT : float
+#         Breadth of glass transition from width of Gaussian fit in deg. C
+#     dT_err : float
+#         Uncertainty in dT fit in deg. C
+#     '''
+#     target_dq = kwargs.get('target_dq', 'dqdT')
+#     bounds = kwargs.get('bounds', ([-100,0,0,-1],[200,1,30,1]))
+
+#     # gaussian with baseline y0
+#     def Gaussian(x, ctr, amp, wid, y0):
+#         return y0 + amp * np.exp(-((x - ctr) / (2 * wid)) ** 2)
+
+#     # clean up dataframe a bit
+#     df = df.replace([np.inf, -np.inf], np.nan).dropna()
+    
+#     # find peak in derivative (min because negative usually)
+#     peak_idx = df[target_dq].idxmin()
+#     guess = kwargs.get('guess', [df.loc[peak_idx, 'temp'], 3e-2, 10, 0])
+    
+#     try:
+#         popt, pcov = curve_fit(Gaussian, df['temp'], -df[target_dq], p0=guess, bounds=bounds)
+#         perr = np.sqrt(np.diag(pcov))
         
-        fit_temp = np.linspace(df['temp'].min(), df['temp'].max(), 1000)
-        fit_curve = Gaussian(fit_temp, *popt)
+#         fit_temp = np.linspace(df['temp'].min(), df['temp'].max(), 1000)
+#         fit_curve = Gaussian(fit_temp, *popt)
         
-        # plot the fit
-        ax.plot(fit_temp, fit_curve, ':', color='k',
-                label=f'T$_g = {popt[0]:0.1f} ^\\circ$C \n $\u03b4T = {popt[2]:0.1f} ^\\circ$C')
+#         # plot the fit
+#         ax.plot(fit_temp, fit_curve, ':', color='k',
+#                 label=f'T$_g = {popt[0]:0.1f} ^\\circ$C \n $\u03b4T = {popt[2]:0.1f} ^\\circ$C')
         
-        # return the peak center and error and the peak width and error
-        return popt[0], perr[0], popt[2], perr[2]
-    except Exception:
-        return np.nan, np.nan, np.nan, np.nan
+#         # return the peak center and error and the peak width and error
+#         return popt[0], perr[0], popt[2], perr[2]
+#     except Exception:
+#         return np.nan, np.nan, np.nan, np.nan

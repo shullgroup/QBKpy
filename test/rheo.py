@@ -18,7 +18,7 @@ from pymittagleffler import mittag_leffler
 
 from .utils import readDataFile, remove_step_lines, DEFAULT_CYCLER
 from .graphics import double_headed_arrow, vline
-from .models import Arrhenius
+from .models import Arrhenius, fitGaussian as _fit_gauss_gen
 
 def readRheo(path, **kwargs):
     chain_time = kwargs.get('chain_time', True)
@@ -372,6 +372,59 @@ def processChirp(df, **kwargs):
 
     return f_df
 
+def fitGaussian(df: pd.DataFrame, xprop: str, yprop: str, ax=None, **kwargs):
+    """
+    Fits rheometer data to a single Gaussian peak.
+
+    This function utilizes the general `fitGaussian_general` to perform the fitting,
+    providing rheometer-specific default bounds and ensuring a 'max' peak direction.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing rheometer data.
+    xprop : str
+        Column name for the x-axis data (e.g., 'Temperature').
+    yprop : str
+        Column name for the y-axis data (e.g., 'G_prime_prime', 'Tan_delta').
+    ax : mpl.axes.Axes, optional
+        Axes object to plot Gaussian fit on. If None, no plot is generated.
+    **kwargs:
+        Additional keyword arguments passed to `fitGaussian_general`.
+        These can include `guess`, `bounds` (to override defaults), `sigma`,
+        `absolute_sigma`, `maxfev`, etc.
+
+    Returns
+    -------
+    ctr : float
+        Center of Gaussian fit. Returns np.nan if fit fails.
+    ctr_err : float
+        Uncertainty in center of Gaussian fit. Returns np.nan if fit fails.
+    wid : float
+        Width of Gaussian fit. Returns np.nan if fit fails.
+    wid_err : float
+        Uncertainty in width of Gaussian fit. Returns np.nan if fit fails.
+    """
+    # Rheometer-specific default bounds (if not provided in kwargs)
+    # Based on your original rheometer function's bounds
+    rheo_bounds = kwargs.pop('bounds', ([0, 0.01, 0.01, -1000], [1e5, 1e5, 1e4, 1000]))
+    
+    # Custom plot label formatter for rheometer data
+    def rheo_label_formatter(ctr, wid):
+        return f'Center = {ctr:0.1f} \n Width = {wid:0.1f}'
+
+    # Call the general fitGaussian function
+    return _fit_gauss_gen(
+        df,
+        x_col=xprop,
+        y_col=yprop,
+        ax=ax,
+        bounds=rheo_bounds,
+        peak_direction='max', # Rheometer peaks are typically positive
+        plot_label_formatter=rheo_label_formatter,
+        **kwargs # Pass remaining kwargs like guess, sigma, maxfev etc.
+    )
+
 def fitGaussian(df, xprop, yprop, **kwargs):
     # CHANGE TO USE GENERALIZED fitGaussian IN MODELS
     '''
@@ -400,7 +453,6 @@ def fitGaussian(df, xprop, yprop, **kwargs):
     '''
     
     ax = kwargs.get('ax', None)
-    return_err = kwargs.get('return_err', False)
     guess = kwargs.get('guess', [100, 100, 100, 0])
     bounds = kwargs.get('bounds', ([0,1,1,-1000],[1e5,1e5,1e4,1000]))
     sigma = kwargs.get('sigma', None)
@@ -441,10 +493,7 @@ def fitGaussian(df, xprop, yprop, **kwargs):
                 label=f'Center = {ctr:0.0f} \n Width = {wid:0.0f}')
         ax.legend()
     
-    if return_err:
-        return ctr, ctr_err, wid, wid_err
-    else:
-        return ctr, wid
+    return ctr, ctr_err, wid, wid_err
 
 def plotCureDeriv(df, **kwargs):
 
