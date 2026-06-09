@@ -16,25 +16,25 @@ from scipy.special import gamma as gammaf
 from scipy.special import digamma
 from pymittagleffler import mittag_leffler
 
-from .utils import first_line, remove_step_lines, DEFAULT_CYCLER
+from .utils import readDataFile, remove_step_lines, DEFAULT_CYCLER
 from .graphics import double_headed_arrow, vline
 from .models import Arrhenius
 
 def readRheo(path, **kwargs):
-    chain_time = kwargs.get('chain_time', False)
+    chain_time = kwargs.get('chain_time', True)
     chirp = kwargs.get('chirp', False)
-
-    # find first line of data
-    start_row = first_line(path)
 
     # read if it is a windowed chirp experiment
     if chirp:
-        with open(path, 'r') as f:
-            # read in the data
-            df = pd.read_csv(f, delimiter='\t', skiprows=start_row,
-                             usecols=[0,1,2,5,6],
-                             names=['time', 'temp', 'torque',
-                                    'stress', 'strain'])
+
+        sep = kwargs.get('sep', '\t')
+        target_cols = kwargs.get('target_cols', [0,1,2,5,6])
+        names = kwargs.get('names', ['time', 'temp', 'torque',
+                                     'stress', 'strain'])
+        df = readDataFile(path, sep=sep,
+                          target_cols=target_cols,
+                          names=names)
+
         
         # remove lines if multiple steps
         df = remove_step_lines(df)
@@ -47,20 +47,16 @@ def readRheo(path, **kwargs):
         df['strain'] = df['strain']/100
 
     else:
-        with open(path, 'r') as f:
-            try:
-                # read in the data
-                df = pd.read_csv(f, delimiter="\t", skiprows=start_row,
-                                usecols=[0,1,2,3,4,5,6,9],
-                                names=['storage','loss','tand',
+        try:
+            sep = kwargs.get('sep', '\t')
+            target_cols = kwargs.get('target_cols', [0,1,2,3,4,5,6,9])
+            names = kwargs.get('names', ['storage','loss','tand',
                                         'ang_freq','torque','time',
                                         'temp','viscosity'])
-            except Exception as e:
-                f.seek(0)
-                # read in the data
-                df = pd.read_csv(f, delimiter="\t", skiprows=start_row,
-                                usecols=[0,1,2,3,4,5,6],
-                                names=['storage','loss','tand',
+        except Exception as e:
+            sep = kwargs.get('sep', '\t')
+            target_cols = kwargs.get('target_cols', [0,1,2,3,4,5,6])
+            names = kwargs.get('names', ['storage','loss','tand',
                                         'ang_freq','torque','time',
                                         'temp'])
 
@@ -82,8 +78,6 @@ def readRheo(path, **kwargs):
                 df['viscosity'] = np.sqrt(df['storage']**2 + df['loss']**2)/df['ang_freq']
         except KeyError:
             df['viscosity'] = np.sqrt(df['storage']**2 + df['loss']**2)/df['ang_freq']
-
-
 
     # round the temperatures
     df['temp'] = df['temp'].round() 
