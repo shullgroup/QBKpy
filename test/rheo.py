@@ -1,5 +1,5 @@
 # updated version of this file is maintained at
-# https://github.com/shullgroup/QKBPy/blob/main/test/rheo.py
+# https://github.com/shullgroup/QBKPy/blob/main/test/rheo.py
 
 import numpy as np
 import pandas as pd

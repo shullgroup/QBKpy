@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # updated version of this file is maintained at
-# https://github.com/shullgroup/QKBPy/blob/main/test/graphics.py
+# https://github.com/shullgroup/QBKPy/blob/main/test/graphics.py
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
