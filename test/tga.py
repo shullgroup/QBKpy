@@ -45,7 +45,9 @@ def readTGA(path, **kwargs):
     # convert to wt%
     df['wt_pct'] = df['wt']/df['wt'].iloc[0]*100
 
-    # can add additional columns like derivative later
+    # calculate derivative of wt and wt_pct w.r.t. temp
+    df['dwt'] = np.gradient(df['wt'], x=df['temp'])
+    df['dwt_pct'] = np.gradient(df['wt_pct'], x=df['temp'])
 
     return df
 
