@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import savgol_filter
 from scipy.optimize import curve_fit
 
-from .utils import first_line, DEFAULT_CYCLER
+from .utils import readDataFile, DEFAULT_CYCLER
 from .graphics import double_headed_arrow, vline
 from .models import fitGaussian as _fit_gauss_gen
 
@@ -44,19 +44,18 @@ def readDSC(path, **kwargs):
     apply_savgol = kwargs.get('apply_savgol', True)
     savgol_window = kwargs.get('savgol_window', 151)
     savgol_polyorder = kwargs.get('savgol_polyorder', 4)
-    sep = kwargs.get('sep', '\t')
+    
 
+    sep = kwargs.get('sep', '\t')
     # Determine columns based on mode
     if mode == 'mdsc':
-        usecols, names = [0, 1, 2, 3, 7], ['time', 'temp', 'q_rev', 'q_non', 'dq_revdT']
+        target_cols, names = [0, 1, 2, 3, 7], ['time', 'temp', 'q_rev', 'q_non', 'dq_revdT']
     else:
-        usecols, names = [0, 1, 2], ['time', 'temp', 'q']
+        target_cols, names = [0, 1, 2], ['time', 'temp', 'q']
 
-    # find first row of data
-    start_row = first_line(path, sep=sep, target_cols=usecols)
-    
-    df = pd.read_csv(path, sep=sep, skiprows=start_row, usecols=usecols, names=names)
-    df = df.dropna().reset_index(drop=True)
+    df = readDataFile(path, sep=sep,
+                      target_cols=target_cols,
+                      names=names)
 
     # Standardize Time (minutes to seconds)
     if kwargs.get('time_to_sec', True):

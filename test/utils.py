@@ -141,6 +141,8 @@ def readDataFile(path, **kwargs):
                              usecols=target_cols,
                              names=names)
             
+    df = df.dropna().reset_index(drop=True)
+            
     return df
 
 def downsample_points_per_decade(
