@@ -13,15 +13,16 @@ from scipy.special import gamma as gammaf
 from scipy.special import digamma
 from pymittagleffler import mittag_leffler
 
-from .utils import readDataFile, DEFAULT_CYCLER
-from .models import Gaussian, Arrhenius, VFT
-from .graphics import double_headed_arrow, vline
+from utils import readDataFile, DEFAULT_CYCLER
+from models import Gaussian, Arrhenius, VFT
+from graphics import double_headed_arrow, vline
 
 
 # axis labels
 axlabels = {'storage':r'$E^\prime$ (Pa)',
            'loss': r'$E^{\prime\prime}$ (Pa)',
-           'phi':r'$\phi$ (deg.)'}
+           'phi':r'$\phi$ (deg.)',
+           'tand':r'tan($\delta$)'}
 
 #Function definitions with docstrings
 def readDMA(path, **kwargs):
@@ -66,12 +67,12 @@ def readDMA(path, **kwargs):
         target_cols = kwargs.get('target_cols',
                                  [0, 1, 2, 3, 4, 5, 6, 7])
         names = kwargs.get('names',
-                           ['ang_freq','t','temp','strain','stress',
+                           ['w','t','temp','strain','stress',
                                     'tand','storage','loss'])
         df = readDataFile(path, sep=sep,
                           target_cols=target_cols,
                           names=names)
-        df['freq'] = df['ang_freq']/(2*np.pi)
+        df['f'] = df['w']/(2*np.pi)
     
     try:
         df['phi'] = np.degrees(np.arctan(df['tand']))
@@ -101,12 +102,12 @@ def readtTS(path, **kwargs):
     target_cols = kwargs.get('target_cols',
                              [0,1,2,3,4,5,6,7])
     names = kwargs.get('names',
-                       ['ang_freq','t','temp','strain','stress',
+                       ['w','t','temp','strain','stress',
                                 'tand','storage','loss'])
     df = readDataFile(path, sep=sep,
                       target_cols=target_cols,
                       names=names)
-    df['freq'] = df['w']/(2*np.pi)
+    df['f'] = df['w']/(2*np.pi)
         
     return df
 
@@ -283,7 +284,7 @@ def plot_tTS(df, ax, prop, **kwargs):
     df : pandas.DataFrame
         Data with columns:
           - 'temp' : temperature (°C)
-          - 'freq' : frequency (Hz)
+          - 'f' : frequency (Hz)
           - prop   : column for the property to plot (e.g., 'E_storage')
     ax : matplotlib.axes.Axes
         Axes to draw the plot on.
@@ -302,7 +303,7 @@ def plot_tTS(df, ax, prop, **kwargs):
             contain columns 'temp' and 'bT'.
         xmult : float, default 1.0
             Global multiplier applied to input x (frequency) before aT:
-            x = freq * xmult * aT[t].
+            x = f * xmult * aT[t].
         colorbar : bool, default True
             If False, do not draw a colorbar and plot all series in one
             color.
@@ -382,8 +383,7 @@ def plot_tTS(df, ax, prop, **kwargs):
     if 'aT' not in df.columns:
         df.insert(3, 'aT', np.nan)
     if 'faT' not in df.columns:
-        df.insert(4, 'waT', np.nan)
-    df['f'] = df['w']/(2*np.pi)
+        df.insert(4, 'faT', np.nan)
     df['faT'] = np.nan
     for t in temps:
         i = int(np.round((t - Tmin) / tempstep))
@@ -396,7 +396,7 @@ def plot_tTS(df, ax, prop, **kwargs):
         df.loc[idx, 'waT']=df.loc[idx, 'w']*aT[t]
         df.loc[idx, 'faT']=df.loc[idx, 'f']*aT[t]
 
-        x_vals = (subset['freq'].to_numpy(dtype=float) *
+        x_vals = (subset['f'].to_numpy(dtype=float) *
                   xmult * float(aT[t]))
         y_vals = subset[prop].to_numpy(dtype=float) * float(bT[t])
 
@@ -491,7 +491,7 @@ def calc_tau_VFT(T, tauref, Tref, B, Tinf):
 
 
 
-def fitVFT(aT_in, **kwargs):
+def fit_VFT(aT_in, **kwargs):
     """
     Fit time–temperature superposition (TTS) shift factors to the
     Vogel–Fulcher–Tammann (VFT) equation and plot aT vs. temperature.
@@ -505,7 +505,7 @@ def fitVFT(aT_in, **kwargs):
 
     T : numpy array
         temperatures
-    aT_in : dictionary with columns 'T' and 'aT'
+    aT_in : dataframe with columns 'T' and 'aT' or dict with T:aT pairs. 
     **kwargs : dict, optional
         title : str, default=None
             Title for the plot.
@@ -516,16 +516,17 @@ def fitVFT(aT_in, **kwargs):
 
     Returns
     -------
-    tuple
-        (B, B_err, Tinf, Tinf_err)
-        - B : float
+    dict
+        Dictionary containing the fitted parameters:
+        - 'B' : float  
             Fitted VFT constant.
-        - B_err : float
+        - 'B_err' : float  
             Standard error of B.
-        - Tinf : float
+        - 'Tinf' : float  
             Fitted ideal glass transition temperature.
-        - Tinf_err : float
+        - 'Tinf_err' : float  
             Standard error of Tinf.
+        - 'Tref' : float  
 
     Notes
     -----
@@ -544,11 +545,18 @@ def fitVFT(aT_in, **kwargs):
     Bguess = kwargs.get('Bguess', 3000)
     
     #find referene temperature
-    T = aT_in['T']
-    aT = aT_in['aT']
+    if isinstance(aT_in, dict):
+        # Dictionary case: keys → T, values → aT
+        T = list(aT_in.keys())
+        aT = list(aT_in.values())
+    else:
+        # DataFrame (or dict-like object with column access)
+        col = 'T' if 'T' in aT_in.columns else 'temp'
+        T = aT_in[col]
+        aT = aT_in['aT']
     logaT = np.log(aT)
-    ref_idx = np.argmin(np.abs(logaT))
-    Tref = T[ref_idx]
+    ref_idx = (np.abs(logaT)).argmin()
+    Tref = T.iloc[ref_idx]
     Tguess = Tref - 50
 
     # Define the VFT fitting function
@@ -592,7 +600,13 @@ def fitVFT(aT_in, **kwargs):
         ax.legend()
         ax.set_title(title)
 
-    return B, B_err, Tinf, Tinf_err, Tref
+    return {
+            'B': B,
+            'B_err': B_err,
+            'Tinf': Tinf,
+            'Tinf_err': Tinf_err,
+            'Tref': Tref
+            }
 
 def lnaT_VFT(T, B, Tinf, Tref):
     lnaT = -B / (Tref - Tinf) + B / (T - Tinf)
