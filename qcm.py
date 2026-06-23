@@ -4,7 +4,7 @@
 Current version:  2025.06.18
 Created on Thu Jan  4 09:19:59 2018 and updated continuously
 most recent version at the following link:
-https://github.co
+https://github.com/shullgroup/QBKPy/blob/main/qcm.py
 @author: Ken Shull (k-shull@northwestern.edu)
 """
 
