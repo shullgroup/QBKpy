@@ -4,7 +4,7 @@
 Current version:  2025.06.18
 Created on Thu Jan  4 09:19:59 2018 and updated continuously
 most recent version at the following link:
-https://github.com/shullgroup/rheoQCM/tree/master/QCMFuncs/QCM_functions.py
+https://github.co
 @author: Ken Shull (k-shull@northwestern.edu)
 """
 
