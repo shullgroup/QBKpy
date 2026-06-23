@@ -4165,5 +4165,151 @@ def hline(x, ax, **kwargs):
     linestyle = kwargs.get('linestyle', 'solid')
     color = kwargs.get('color', 'k')
     plt.vlines(x, xmin, xmax, color = color, linestyle = linestyle)
+    
+    
+from matplotlib.lines import Line2D
+from matplotlib.collections import LineCollection
 
+def extract_axis_plots(ax):
+    """
+    Extract all plotted data from a Matplotlib axis in the order the plots
+    were created. Supports both normal line plots and errorbar plots.
 
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        The axis containing plotted data.
+
+    Returns
+    -------
+    dict
+        A dictionary where keys are integers from 0 to n-1 (creation order),
+        and each value is another dictionary with:
+        
+        {
+            "data": DataFrame with columns:
+                - x
+                - y
+                - xerr_minus
+                - xerr_plus
+                - yerr_minus
+                - yerr_plus
+            "label": legend label (string) or None
+        }
+
+        For non-error plots, all error columns are filled with NaN.
+    """
+
+    children = ax.get_children()
+    results = {}
+    idx = 0
+    i = 0
+
+    while i < len(children):
+
+        artist = children[i]
+
+        # ---------------------------------------------------------
+        # CASE 1: Line2D (may be normal line or start of errorbar)
+        # ---------------------------------------------------------
+        if isinstance(artist, Line2D):
+
+            x = np.asarray(artist.get_xdata(), dtype=float)
+            y = np.asarray(artist.get_ydata(), dtype=float)
+
+            label = artist.get_label()
+            if label == "_nolegend_":
+                label = None
+
+            # Look ahead for associated errorbar artists
+            j = i + 1
+            vert_segs = None
+            horiz_segs = None
+
+            while j < len(children):
+                nxt = children[j]
+
+                # Stop scanning when we hit non-plot artists
+                if not isinstance(nxt, (Line2D, LineCollection)):
+                    break
+
+                # Errorbar segments are LineCollections
+                if isinstance(nxt, LineCollection):
+                    segs = np.asarray(nxt.get_segments(), dtype=float)
+
+                    # Must match number of data points
+                    if len(segs) == len(x):
+                        # Determine orientation by comparing dx vs dy
+                        dx = np.abs(segs[:, 0, 0] - segs[:, 1, 0])
+                        dy = np.abs(segs[:, 0, 1] - segs[:, 1, 1])
+
+                        if np.mean(dy) > np.mean(dx):
+                            vert_segs = segs
+                        else:
+                            horiz_segs = segs
+
+                j += 1
+
+            # ---------------------------------------------------------
+            # CASE 2: Normal line (no errorbars found)
+            # ---------------------------------------------------------
+            if vert_segs is None and horiz_segs is None:
+                nan = np.full_like(x, np.nan, dtype=float)
+                df = pd.DataFrame({
+                    "x": x,
+                    "y": y,
+                    "xerr_minus": nan,
+                    "xerr_plus": nan,
+                    "yerr_minus": nan,
+                    "yerr_plus": nan
+                })
+                results[idx] = {"data": df, "label": label}
+                idx += 1
+                i += 1
+                continue
+
+            # ---------------------------------------------------------
+            # CASE 3: Errorbar plot
+            # ---------------------------------------------------------
+            xerr_minus = np.full_like(x, np.nan, dtype=float)
+            xerr_plus  = np.full_like(x, np.nan, dtype=float)
+            yerr_minus = np.full_like(y, np.nan, dtype=float)
+            yerr_plus  = np.full_like(y, np.nan, dtype=float)
+
+            # Vertical errorbars (yerr)
+            if vert_segs is not None:
+                # vert_segs shape: (npoints, 2, 2)
+                lower = np.min(vert_segs[:, :, 1], axis=1)
+                upper = np.max(vert_segs[:, :, 1], axis=1)
+                yerr_minus = y - lower
+                yerr_plus  = upper - y
+
+            # Horizontal errorbars (xerr)
+            if horiz_segs is not None:
+                left  = np.min(horiz_segs[:, :, 0], axis=1)
+                right = np.max(horiz_segs[:, :, 0], axis=1)
+                xerr_minus = x - left
+                xerr_plus  = right - x
+
+            df = pd.DataFrame({
+                "x": x,
+                "y": y,
+                "xerr_minus": xerr_minus,
+                "xerr_plus": xerr_plus,
+                "yerr_minus": yerr_minus,
+                "yerr_plus": yerr_plus
+            })
+
+            results[idx] = {"data": df, "label": label}
+            idx += 1
+
+            # Skip all grouped artists
+            i = j
+            continue
+
+        # ---------------------------------------------------------
+        # Skip non-Line2D artists
+        # ---------------------------------------------------------
+        i += 1
+
+    return results
