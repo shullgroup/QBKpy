@@ -7,11 +7,11 @@ import matplotlib.pyplot as plt
 from scipy.signal import savgol_filter
 from scipy.optimize import curve_fit
 
-from .utils import readDataFile, DEFAULT_CYCLER
-from .graphics import double_headed_arrow, vline
-from .models import fitGaussian as _fit_gauss_gen
+from utils import read_data_file, default_cycler
+from graphics import double_headed_arrow, vline
+from models import fitGaussian as _fit_gauss_gen
 
-def readDSC(path, **kwargs):
+def read_DSC(path, **kwargs):
     '''
     Read txt file from DSC experiment and convert to a DataFrame.
     Supports both conventional ('conv') and modulated ('mdsc') modes.
@@ -53,7 +53,7 @@ def readDSC(path, **kwargs):
     else:
         target_cols, names = [0, 1, 2], ['time', 'temp', 'q']
 
-    df = readDataFile(path, sep=sep,
+    df = read_data_file(path, sep=sep,
                       target_cols=target_cols,
                       names=names)
 
@@ -63,7 +63,11 @@ def readDSC(path, **kwargs):
 
     # Handle Derivatives for conventional mode
     if mode == 'conv':
-        df['dqdT'] = np.gradient(df['q'], df['temp'])
+        try:
+            df['dqdT'] = np.gradient(df['q'], df['temp'])
+        except:
+            df['dqdT'] = np.nan
+        
 
     # apply Savitsky-Golay filter to smooth data
     # because normally very coarse/jumpy directly from instrument
@@ -77,7 +81,7 @@ def readDSC(path, **kwargs):
 
     return df
 
-def plotDSC(df, **kwargs):
+def plot_DSC(df, **kwargs):
     '''
     Generate typical plots for DSC experiments. Emphasis primarily placed
     on finding Tg as opposed to other transitions for now.
@@ -152,13 +156,13 @@ def plotDSC(df, **kwargs):
         ax.set_title(title)
     
     # Apply your custom cycler to the specific axes
-    ax.set_prop_cycle(DEFAULT_CYCLER)
+    ax.set_prop_cycle(default_cycler)
 
     # if not given a twin axis for the derivative, make one
     if not twin:
         twin = ax.twinx()
         twin.set_ylabel('Deriv. Heat Flow (W/g*$^{\\circ}$C)')
-        twin.set_prop_cycle(DEFAULT_CYCLER)
+        twin.set_prop_cycle(default_cycler)
 
     # plot heat flow and derivative w.r.t. temperature
     ax.plot(df['temp'], df[q_col], '-', label='Heat Flow')
@@ -193,7 +197,7 @@ def plotDSC(df, **kwargs):
     return Tg, ax, twin
 
 
-def fitGaussian(df: pd.DataFrame, ax, **kwargs):
+def fit_Gaussian(df: pd.DataFrame, ax, **kwargs):
     """
     Fits DSC derivative data to a single Gaussian peak (for Glass Transition).
 

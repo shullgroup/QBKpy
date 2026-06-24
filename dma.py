@@ -13,7 +13,7 @@ from scipy.special import gamma as gammaf
 from scipy.special import digamma
 from pymittagleffler import mittag_leffler
 
-from utils import readDataFile, DEFAULT_CYCLER
+from utils import read_data_file, default_cycler
 from models import Gaussian, Arrhenius, VFT
 from graphics import double_headed_arrow, vline
 

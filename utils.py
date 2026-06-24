@@ -8,7 +8,7 @@ import csv
 from cycler import cycler
 
 # Shared across the library
-DEFAULT_CYCLER = cycler(color=[
+default_cycler = cycler(color=[
     '#0093F5', '#F08E2C', '#000000', '#424EBD', '#B04D25', '#75CA85', '#C892D6'
 ]*3, linestyle=['-']*7 + ['--']*7 + [':']*7)
 
@@ -32,52 +32,107 @@ def is_numeric(cell):
     except (ValueError, TypeError):
         return False
 
+
+from openpyxl import load_workbook
+
+
 def first_line(path, **kwargs):
-    '''
-    Find first line of data file to skip headers.
-    
-    Parameters
-    ----------
-    path : Path
-        Path to data file using pathlib Path object.
-    sep : str, default '\t'
-        Delimiter used in file.
-    target_cols : list, default None
-        Array/list of specific columns to read.
-    encoding : str, default 'utf-8'
-        Encoding style option if this is ever a problem.
-    
-    Returns
-    -------
-    start_row : int
-        First row in file with numeric data.
-    '''
-    sep = kwargs.get('sep', '\t')
+    """
+    Determine the first row of numeric data for CSV or Excel files.
+    Includes automatic delimiter detection and efficient Excel scanning.
+    """
+
+    path = Path(path)
+    ext = path.suffix.lower()
+
+    sep = kwargs.get('sep', None)  # None triggers auto-detection
     target_cols = kwargs.get('target_cols', None)
     encoding = kwargs.get('encoding', 'utf-8')
-    
-    # Try opening with UTF-8, fallback to latin-1
+
+    # ------------------------------------------------------------
+    # Excel files: use openpyxl to stream rows
+    # ------------------------------------------------------------
+    if ext in [".xls", ".xlsx"]:
+        # For .xls you'd need xlrd or similar; this handles .xlsx well.
+        if ext == ".xlsx":
+            wb = load_workbook(path, read_only=True, data_only=True)
+            ws = wb.active  # or choose a specific sheet
+
+            # openpyxl rows are 1-based; we want 0-based index
+            for row_idx, row in enumerate(ws.iter_rows(values_only=True), start=0):
+                cells = list(row)
+
+                # Skip completely empty rows
+                if all(c is None or str(c).strip() == "" for c in cells):
+                    continue
+
+                if target_cols is not None:
+                    # Ensure we have enough columns
+                    if len(cells) > max(target_cols):
+                        if all(is_numeric(cells[c]) for c in target_cols):
+                            return row_idx
+                else:
+                    if any(is_numeric(c) for c in cells):
+                        return row_idx
+
+            return 0
+        else:
+            # Simple fallback for .xls: load once with pandas
+            df = pd.read_excel(path, header=None)
+            for i, row in df.iterrows():
+                cells = row.tolist()
+                if all(pd.isna(c) or str(c).strip() == "" for c in cells):
+                    continue
+
+                if target_cols is not None:
+                    if all(is_numeric(cells[c]) for c in target_cols):
+                        return int(i)
+                else:
+                    if any(is_numeric(c) for c in cells):
+                        return int(i)
+            return 0
+
+    # ------------------------------------------------------------
+    # Text-based files: CSV, TXT, DAT
+    # ------------------------------------------------------------
+
+    # Try UTF-8, fallback to latin-1
     try:
         with open(path, 'r', encoding=encoding) as f:
             f.readline()
     except UnicodeDecodeError:
-        encoding = 'latin-1'
+        encoding = "latin-1"
+
+    # Auto-detect delimiter if not provided
+    if sep is None:
+        with open(path, 'r', encoding=encoding) as f:
+            sample = f.read(4096)
+            try:
+                sep = csv.Sniffer().sniff(sample).delimiter
+            except Exception:
+                sep = ','  # fallback
 
     with open(path, 'r', encoding=encoding) as f:
         reader = csv.reader(f, delimiter=sep)
+
         for i, row in enumerate(reader):
-            cleaned_row = [cell.strip() for cell in row]
-            if not cleaned_row:
+            cleaned = [cell.strip() for cell in row]
+
+            if not cleaned:
                 continue
-            
+
             if target_cols is not None:
-                if len(cleaned_row) > max(target_cols):
-                    if all(is_numeric(cleaned_row[c]) for c in target_cols):
+                if len(cleaned) > max(target_cols):
+                    if all(is_numeric(cleaned[c]) for c in target_cols):
                         return i
             else:
-                if any(is_numeric(cell) for cell in cleaned_row):
+                if any(is_numeric(cell) for cell in cleaned):
                     return i
+
     return 0
+
+
+
 
 def remove_step_lines(df):
     '''
@@ -105,45 +160,68 @@ def remove_step_lines(df):
 
     return df
 
-def readDataFile(path, **kwargs):
-    '''
-    Read a general data file by finding the first line of numeric data
-    and returning a pandas DataFrame
+from pathlib import Path
 
-    Parameters
-    ----------
-    path : Path
-        Path object to the data file.
+import pandas as pd
+from pathlib import Path
 
-    sep : str, default '\t'
-        Delimiter for file. Default is tab.
+def read_data_file(path, **kwargs):
+    """
+    Read a general data file (.csv, .xls, .xlsx) by detecting file type.
+    For text files, find the first line of numeric data and return a DataFrame.
+    Ensures all values are converted to numeric when possible.
+    """
 
-    target_cols : list, default [0, 1]
-        List of int for which columns to read.
-
-    names : list, default ['col1', 'col2']
-        List of column names to use in the DataFrame
-    
-    Returns
-    -------
-    df : pd.DataFrame
-        Cleaned dataframe with step lines removed.
-    '''
+    path = Path(path)
+    ext = path.suffix.lower()
 
     sep = kwargs.get('sep', '\t')
-    target_cols = kwargs.get('target_cols', [0,1])
+    target_cols = kwargs.get('target_cols', [0, 1])
     names = kwargs.get('names', ['col1', 'col2'])
 
-    with open(path, 'r') as f:
-            # Pass target_cols to prevent premature stopping on metadata
-            skiprows = first_line(path, sep=sep, target_cols=target_cols)
-            df = pd.read_csv(f, delimiter=sep, skiprows=skiprows,
-                             usecols=target_cols,
-                             names=names)
-            
-    df = df.dropna().reset_index(drop=True)
-            
+    # Determine where numeric data begins
+    skiprows = first_line(path, sep=sep, target_cols=target_cols)
+
+    # ------------------------------------------------------------
+    # Excel files
+    # ------------------------------------------------------------
+    if ext in [".xls", ".xlsx"]:
+        df = pd.read_excel(
+            path,
+            usecols=target_cols,
+            names=names,
+            skiprows=skiprows
+        )
+
+    # ------------------------------------------------------------
+    # CSV / text files
+    # ------------------------------------------------------------
+    elif ext in [".csv", ".txt", ".dat"]:
+        df = pd.read_csv(
+            path,
+            delimiter=sep,
+            skiprows=skiprows,
+            usecols=target_cols,
+            names=names
+        )
+
+    else:
+        raise ValueError(f"Unsupported file type: {ext}")
+
+    # ------------------------------------------------------------
+    # Drop empty rows
+    # ------------------------------------------------------------
+    df = df.dropna(how="all").reset_index(drop=True)
+
+    # ------------------------------------------------------------
+    # Convert all columns to numeric where possible
+    # ------------------------------------------------------------
+    for col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
     return df
+
+
 
 def downsample_points_per_decade(
     x,
