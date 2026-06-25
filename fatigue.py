@@ -11,6 +11,7 @@ import matplotlib.ticker as mticker
 from scipy.signal import savgol_filter
 from sympy import symbols, diff, log, sqrt, lambdify, Rational
 from copy import deepcopy
+from .utils import default_cycler
 
 # a is the crack length
 # W is the sample width in the direction of crack propgation
@@ -625,6 +626,7 @@ def fatigue_plot_CT(df, **kwargs):
     if detailed:
 
         fig, ax = plt.subplots(1,3, figsize=(12,3), constrained_layout=True)
+        ax.set_prop_cycle(default_cycler)
         
         # cycles force-displacement plot
         norm = mpl.colors.Normalize(vmin=min(df['cycles']), vmax=max(df['cycles']))
@@ -663,6 +665,7 @@ def fatigue_plot_CT(df, **kwargs):
     else:
 
         fig, ax = plt.subplots(1,1, figsize=(4,3), constrained_layout=True)
+        ax.set_prop_cycle(default_cycler)
 
         ax.loglog(df['DeltaK'], df['dadN'], 'o')
         ax.set_xlabel('$\\Delta$K (MPa$\\sqrt{m}$)')
