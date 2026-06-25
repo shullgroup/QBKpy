@@ -4,7 +4,19 @@
 import numpy as np
 import pandas as pd
 
-from .utils import default_cycler
+from .utils import default_cycler, read_data_file
+
+def read_kic(path, **kwargs):
+
+    sep = kwargs.get('sep', ',') 
+    target_cols = kwargs.get('target_cols', [0, 1, 2])
+    names = kwargs.get('names', ['time', 'disp', 'force'])
+
+    df = read_data_file(path, sep=sep,
+                        target_cols=target_cols,
+                        names=names)
+    
+    return df
 
 def KIcfx(x, **kwargs):
     '''
