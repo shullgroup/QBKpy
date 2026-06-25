@@ -18,6 +18,16 @@ def read_kic(path, **kwargs):
     
     return df
 
+def Pmax(df, **kwargs):
+
+    geometry = kwargs.get('geometry', 'CT')
+
+    if geometry == 'CT':
+        return max(df['force'])
+
+    elif geometry == 'SENB':
+        return (min(df['force']))
+
 def KIcfx(x, **kwargs):
     '''
     Eq A1.1 or A2.1 from ASTM D5045
