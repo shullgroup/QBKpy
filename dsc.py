@@ -81,7 +81,7 @@ def read_DSC(path, **kwargs):
 
     return df
 
-def plot_DSC(df, **kwargs):
+def plot_DSC(df, ax, **kwargs):
     '''
     Generate typical plots for DSC experiments. Emphasis primarily placed
     on finding Tg as opposed to other transitions for now.
@@ -90,11 +90,13 @@ def plot_DSC(df, **kwargs):
     ----------
     df : pd.DataFrame
         DataFrame containing experimental data read in from the readDSC function
+    ax : mpl.axes.Axes, default None
+            Axes for the heat flow if one already exists.
+            
     mode : str, default 'conv'
         DSC mode used for experiment. Options are 'conv' for conventional DSC
         or 'mdsc' for temperature modulated DSC.
-    ax : mpl.axes.Axes, default None
-        Axes for the heat flow if one already exists.
+
     twin : mpl.axes.Axes, default None
         Twin axis for the derivative data if one already exists.
     title : str, default None
@@ -128,7 +130,6 @@ def plot_DSC(df, **kwargs):
         Axes instance used for plotting the derivative heat flow.
     '''
     mode = kwargs.get('mode', 'conv')
-    ax = kwargs.get('ax', None)
     twin = kwargs.get('twin', None)
     title = kwargs.get('title', None)
     savepath = kwargs.get('savepath', None)
@@ -172,7 +173,7 @@ def plot_DSC(df, **kwargs):
     Tg = None
     if kwargs.get('showTg', True):
         # We pass the column name to fit function so it knows what to fit
-        Tg, Tg_err, dT, dT_err = fitGaussian(df, twin, target_dq=dq_col, **kwargs)
+        Tg, Tg_err, dT, dT_err = fit_Gaussian(df, twin, target_dq=dq_col, **kwargs)
     
     # add everything to the same legend unless you don't want a legend
     if not no_legend:
