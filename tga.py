@@ -1,5 +1,5 @@
 # updated version of this file is maintained at
-# https://github.com/shullgroup/QBKPy/blob/main/test/tga.py
+# https://github.com/shullgroup/QBKPy/blob/main/tga.py
 
 import numpy as np
 import pandas as pd

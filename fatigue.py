@@ -1,3 +1,6 @@
+# updated version of this file is maintained at
+# https://github.com/shullgroup/QBKPy/blob/main/fatigue.py
+
 import numpy as np
 import pandas as pd
 import sys

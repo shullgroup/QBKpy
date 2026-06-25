@@ -1,5 +1,5 @@
 # updated version of this file is maintained at
-# https://github.com/shullgroup/QBKPy/blob/main/test/models.py
+# https://github.com/shullgroup/QBKPy/blob/main/models.py
 
 import numpy as np
 import pandas as pd
