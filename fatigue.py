@@ -626,7 +626,8 @@ def fatigue_plot_CT(df, **kwargs):
     if detailed:
 
         fig, ax = plt.subplots(1,3, figsize=(12,3), constrained_layout=True)
-        ax.set_prop_cycle(default_cycler)
+        ax[1].set_prop_cycle(default_cycler)
+        ax[2].set_prop_cycle(default_cycler)
         
         # cycles force-displacement plot
         norm = mpl.colors.Normalize(vmin=min(df['cycles']), vmax=max(df['cycles']))
