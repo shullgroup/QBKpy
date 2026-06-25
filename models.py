@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 R = 8.3145
 
 # gaussian with baseline
-def Gaussian(x, ctr, amp, wid, baseline=0):
+def gaussian(x, ctr, amp, wid, baseline=0):
     """
     Defines a Gaussian function with a baseline.
 
@@ -35,7 +35,7 @@ def Gaussian(x, ctr, amp, wid, baseline=0):
     """
     return baseline + amp * np.exp(-((x - ctr)**2) / (2 * wid**2))
 
-def fitGaussian(
+def fit_gaussian(
     df: pd.DataFrame,
     x_col: str,
     y_col: str,
@@ -104,14 +104,14 @@ def fitGaussian(
     x_data = df_clean[x_col]
     y_data = df_clean[y_col]
 
-    # 2. Handle Peak Direction for Fitting
+    # Handle Peak Direction for Fitting
     # For 'min' peaks, invert y-data for fitting so curve_fit sees a positive peak.
     # We will adjust the amplitude back for plotting.
     fit_y_data = y_data
     if peak_direction == 'min':
         fit_y_data = -y_data
 
-    # 3. Automatic Guess for Parameters if not provided
+    # Automatic Guess for Parameters if not provided
     if guess is None:
         peak_idx = fit_y_data.idxmax() # Find the max of (potentially inverted) y_data
         ctr_auto_guess = x_data.loc[peak_idx]
@@ -127,7 +127,7 @@ def fitGaussian(
 
         guess = [ctr_auto_guess, amp_auto_guess, wid_auto_guess, baseline_auto_guess]
 
-    # 4. Default Bounds (very broad to be general)
+    # Default Bounds (very broad to be general)
     if bounds is None:
         x_min, x_max = x_data.min(), x_data.max()
         y_min, y_max = y_data.min(), y_data.max() # Use original y_data for bounds reasoning
@@ -145,8 +145,8 @@ def fitGaussian(
         )
 
     try:
-        # 5. Perform the Curve Fit
-        popt, pcov = curve_fit(Gaussian, x_data, fit_y_data, p0=guess,
+        # Perform the Curve Fit
+        popt, pcov = curve_fit(gaussian, x_data, fit_y_data, p0=guess,
                                bounds=bounds, sigma=sigma,
                                absolute_sigma=absolute_sigma, **kwargs)
         perr = np.sqrt(np.diag(pcov))
@@ -155,7 +155,7 @@ def fitGaussian(
         ctr, amp_fit, wid, baseline_fit = popt
         ctr_err, amp_err, wid_err, baseline_err = perr
 
-        # 6. Generate Fit Curve for Plotting
+        # Generate Fit Curve for Plotting
         fit_x = np.linspace(x_data.min(), x_data.max(), num=1000)
         
         # For plotting, if peak_direction was 'min', we need to invert the fitted amplitude
@@ -164,9 +164,9 @@ def fitGaussian(
         if peak_direction == 'min':
             plot_amp = -amp_fit
 
-        fit_y = Gaussian(fit_x, ctr, plot_amp, wid, baseline_fit)
+        fit_y = gaussian(fit_x, ctr, plot_amp, wid, baseline_fit)
 
-        # 7. Plot if ax is provided
+        # Plot if ax is provided
         if ax:
             if plot_label_formatter:
                 label = plot_label_formatter(ctr, wid)
@@ -175,7 +175,6 @@ def fitGaussian(
             ax.plot(fit_x, fit_y, ':', color='k', label=label)
             ax.legend()
         
-        # 8. Return results
         return ctr, ctr_err, wid, wid_err
 
     except Exception as e:

@@ -9,7 +9,7 @@ from scipy.optimize import curve_fit
 
 from utils import read_data_file, default_cycler
 from graphics import double_headed_arrow, vline
-from models import fitGaussian as _fit_gauss_gen
+from models import fit_gaussian as _fit_gauss_gen
 
 def read_DSC(path, **kwargs):
     '''
@@ -172,7 +172,7 @@ def plot_DSC(df, **kwargs):
     Tg = None
     if kwargs.get('showTg', True):
         # We pass the column name to fit function so it knows what to fit
-        Tg, Tg_err, dT, dT_err = fitGaussian(df, twin, target_dq=dq_col, **kwargs)
+        Tg, Tg_err, dT, dT_err = fit_gaussian(df, twin, target_dq=dq_col, **kwargs)
     
     # add everything to the same legend unless you don't want a legend
     if not no_legend:
@@ -197,7 +197,7 @@ def plot_DSC(df, **kwargs):
     return Tg, ax, twin
 
 
-def fit_Gaussian(df: pd.DataFrame, ax, **kwargs):
+def fit_gaussian(df: pd.DataFrame, ax, **kwargs):
     """
     Fits DSC derivative data to a single Gaussian peak (for Glass Transition).
 
