@@ -25,7 +25,7 @@ axlabels = {'storage':r'$E^\prime$ (Pa)',
            'tand':r'tan($\delta$)'}
 
 #Function definitions with docstrings
-def readDMA(path, **kwargs):
+def read_dma(path, **kwargs):
     '''
     Returns a DataFrame from DMA temp sweep experiment.
 
@@ -57,7 +57,7 @@ def readDMA(path, **kwargs):
         sep = kwargs.get('sep', '\t')
         target_cols = kwargs.get('target_cols', [0, 1, 2, 3])
         names = kwargs.get('names', ['temp', 'storage', 'loss', 'tand'])
-        df = readDataFile(path, sep=sep, 
+        df = read_data_file(path, sep=sep, 
                           target_cols=target_cols, 
                           names=names)
 
@@ -69,7 +69,7 @@ def readDMA(path, **kwargs):
         names = kwargs.get('names',
                            ['w','t','temp','strain','stress',
                                     'tand','storage','loss'])
-        df = readDataFile(path, sep=sep,
+        df = read_data_file(path, sep=sep,
                           target_cols=target_cols,
                           names=names)
         df['f'] = df['w']/(2*np.pi)
@@ -82,7 +82,7 @@ def readDMA(path, **kwargs):
 
     return df
 	
-def readtTS(path, **kwargs):
+def read_tTS(path, **kwargs):
     '''
     Returns a DataFrame from time-temperature superposition experiment.
 
@@ -104,7 +104,7 @@ def readtTS(path, **kwargs):
     names = kwargs.get('names',
                        ['w','t','temp','strain','stress',
                                 'tand','storage','loss'])
-    df = readDataFile(path, sep=sep,
+    df = read_data_file(path, sep=sep,
                       target_cols=target_cols,
                       names=names)
     df['f'] = df['w']/(2*np.pi)
@@ -151,7 +151,7 @@ def readStressRelax_old(path, **kwargs):
 
     return t, mod
 
-def readStressRelax(path, **kwargs):
+def read_stress_relax(path, **kwargs):
     '''
     Returns a DataFrame from a stress relaxation experiment.
 
@@ -182,7 +182,7 @@ def readStressRelax(path, **kwargs):
     names = kwargs.get('names',
                        ['time', 'strain', 'stress', 'modulus', 'torque'])
 
-    df = readDataFile(path, sep=sep,
+    df = read_data_file(path, sep=sep,
                       target_cols=target_cols,
                       names=names)
                      
@@ -191,7 +191,7 @@ def readStressRelax(path, **kwargs):
     
     return df
 
-def plotStressRelax(*arg, **kwargs):
+def plot_stress_relax(*arg, **kwargs):
 
     """
     Plot relaxation modulus versus time for one or more datasets.
@@ -240,7 +240,7 @@ def plotStressRelax(*arg, **kwargs):
 
     fig, ax = plt.subplots(1, 1, figsize=(4, 3), constrained_layout=True)
     # Apply custom cycler to the specific axes
-    ax.set_prop_cycle(DEFAULT_CYCLER)
+    ax.set_prop_cycle(default_cycler)
 
     a = 0
     for A in arg:
@@ -580,7 +580,7 @@ def fit_VFT(aT_in, **kwargs):
     if 'ax' in kwargs.keys():
         ax = kwargs.get('ax')
         # Apply custom cycler to the specific axes
-        ax.set_prop_cycle(DEFAULT_CYCLER)
+        ax.set_prop_cycle(default_cycler)
         # Plot aT vs. T
         ax.set_xlabel('T ($^{\\circ}$C)')
         ax.set_ylabel(r'$a_T$')
@@ -623,7 +623,7 @@ def Tg_DMA(B, Tinf, Tref, tau_ref, tau):
                                   bounds=(Tinf+10, Tinf+400))
     return soln['x']
     
-def fitArrhenius(aT, **kwargs):
+def fit_arrhenius(aT, **kwargs):
     """
     Fit time–temperature superposition (TTS) shift factors to Arrhenius form
     and plot aT vs. temperature.
@@ -666,7 +666,7 @@ def fitArrhenius(aT, **kwargs):
     # Plot aT vs. T
     fig, ax = plt.subplots(1, 1, figsize=(4, 3), constrained_layout=True)
     # Apply custom cycler to the specific axes
-    ax.set_prop_cycle(DEFAULT_CYCLER)
+    ax.set_prop_cycle(default_cycler)
 
     ax.set_xlabel('Temperature ($^{\\circ}$C)')
     ax.set_ylabel(r'$a_T$')
@@ -756,7 +756,7 @@ def E_A_VFT(T, B, Tinf, **kwargs):
     return E_A, E_A_err
 
 
-def fitPowerLaw(df, **kwargs):
+def fit_power_law(df, **kwargs):
     """
     Fit modulus and time values to a power-law model.
 
@@ -776,7 +776,7 @@ def fitPowerLaw(df, **kwargs):
 
     fig, ax = plt.subplots(1, 1, figsize=(4, 3), constrained_layout=True)
     # Apply custom cycler to the specific axes
-    ax.set_prop_cycle(DEFAULT_CYCLER)
+    ax.set_prop_cycle(default_cycler)
 
     ax.set_xlabel('Time (s)')
     ax.set_ylabel('Relaxation Modulus (Pa)')
@@ -812,7 +812,7 @@ def fitPowerLaw(df, **kwargs):
     ax.legend()
     return plt.show()
 
-def fitMaxwell(df, **kwargs):
+def fit_maxwell(df, **kwargs):
     '''
     Performs fit of Maxwell model (exponential decay) to time and modulus data 
     from stress relaxation (or other) experiment.
@@ -903,7 +903,7 @@ def fitMaxwell(df, **kwargs):
         
     return tau, tau_err
 
-def fitKWW(df, **kwargs):
+def fit_KWW(df, **kwargs):
     """
     Fit stress relaxation data to a stretched exponential (KWW) model.
 
@@ -1022,7 +1022,7 @@ def fitKWW(df, **kwargs):
 
     return G0, tau, avgtau, avgtau_err, beta
 
-def fitFracMaxwell(df, **kwargs):
+def fit_frac_maxwell(df, **kwargs):
     """
     Fit stress relaxation data to a fractional Maxwell model.
 
@@ -1103,7 +1103,7 @@ def fitFracMaxwell(df, **kwargs):
         print('The exponents must be between 0 and 1.')
 
     # Define fractional Maxwell model
-    def fracMaxwell(time, G, a, V, b):
+    def frac_maxwell(time, G, a, V, b):
         prefactor = [G * t ** (-b) for t in time]
         MLtime = [(-G / V) * t ** (a - b) for t in time]
         MLa = a - b
@@ -1121,7 +1121,7 @@ def fitFracMaxwell(df, **kwargs):
     fig, ax = plt.subplots(1, 1, figsize=(4, 3), constrained_layout=True)
 
     # Apply custom cycler to the specific axes
-    ax.set_prop_cycle(DEFAULT_CYCLER)
+    ax.set_prop_cycle(default_cycler)
 
     ax.set_xlabel('Time / $a_T$ (s)' if tts else 'Time (s)')
     ax.set_ylabel('G(t) / $b_T$ (Pa)' if tts else 'Relaxation Modulus G(t)')
@@ -1133,7 +1133,7 @@ def fitFracMaxwell(df, **kwargs):
         b = 0
         berr = 0
         popt, pcov = curve_fit(
-            lambda time, G, a, V: fracMaxwell(time, G, a, V, b),
+            lambda time, G, a, V: frac_maxwell(time, G, a, V, b),
             df['time'], df['modulus'],
             p0=[Gguess, aguess, Vguess],
             bounds=([1e4, 0.3, 1e4], [1e9, 1, 1e11])
@@ -1145,7 +1145,7 @@ def fitFracMaxwell(df, **kwargs):
         a = 1
         aerr = 0
         popt, pcov = curve_fit(
-            lambda time, G, V, b: fracMaxwell(time, G, a, V, b),
+            lambda time, G, V, b: frac_maxwell(time, G, a, V, b),
             df['time'], df['modulus'],
             p0=[Gguess, Vguess, bguess],
             bounds=([1e4, 1e4, 0], [1e9, 1e11, 0.5])
@@ -1155,7 +1155,7 @@ def fitFracMaxwell(df, **kwargs):
 
     else:
         popt, pcov = curve_fit(
-            fracMaxwell,
+            frac_maxwell,
             df['time'], df['modulus'],
             p0=[Gguess, aguess, Vguess, bguess],
             bounds=([1e4, 0.3, 1e4, 0], [1e9, 1, 1e11, 0.2])
@@ -1187,7 +1187,7 @@ def fitFracMaxwell(df, **kwargs):
     # Plot fit
     tfit = np.logspace(np.log10(min(df['time'])),
                        np.log10(max(df['time'])), 100)
-    modfit = fracMaxwell(tfit, G, a, V, b)
+    modfit = frac_maxwell(tfit, G, a, V, b)
     ax.loglog(tfit, modfit, '--', linewidth=2,
               markevery=10, label=fitlabel)
 
@@ -1206,7 +1206,7 @@ def fitFracMaxwell(df, **kwargs):
 
 
 
-def findTg(temp, data):
+def find_Tg(temp, data):
     """
     Return the glass transition temperature (Tg) using the maximum of
     tan(delta) or loss modulus.
@@ -1236,146 +1236,6 @@ def findTg(temp, data):
 
     Tg = round(tempfit[fitmaxi], 1)
     return print(Tg)
-
-
-
-def findTandMax(df):
-    """
-    Return temperatures of maximum tan(delta) for frequency sweep data.
-
-    Parameters
-    ----------
-    df : dict
-        Dictionary of DataFrames for different frequencies.
-
-    Returns
-    -------
-    list
-        List of inverse temperatures (1/T) for each frequency.
-    """
-    invT = []
-    for i in np.arange(0, len(df.keys()), 1):
-        try:
-            maxi = np.argmax(df[list(df.keys())[i]]['Tan(delta)'])
-
-            fitrange_temp = df[list(df.keys())[i]]['Temperature'][maxi - 2:maxi + 2]
-            fitrange_tand = df[list(df.keys())[i]]['Tan(delta)'][maxi - 2:maxi + 2]
-
-            pfit = np.polyfit(fitrange_temp, fitrange_tand, 2)
-
-            tempfit = np.linspace(
-                df[list(df.keys())[i]]['Temperature'][maxi - 2],
-                df[list(df.keys())[i]]['Temperature'][maxi + 2],
-                50
-            )
-            tandfit = [pfit[0] * x ** 2 + pfit[1] * x + pfit[2] for x in tempfit]
-            fitmaxi = np.argmax(tandfit)
-            t = tempfit[fitmaxi] + 273
-
-            invT.append(1 / t)
-        except (KeyError, TypeError):
-            invT.append(np.nan)
-
-    return invT
-
-
-def findEpr(temp, stor):
-    """
-    Return the rubbery storage modulus minimum and corresponding temperature.
-
-    Parameters
-    ----------
-    temp : array-like
-        Temperature values.
-    stor : array-like
-        Storage modulus values.
-
-    Returns
-    -------
-    tuple
-        Epr : float
-            Minimum storage modulus.
-        T : float
-            Temperature at minimum storage modulus.
-    """
-    mini = np.argmin(stor)
-    T = temp[mini]
-    Epr = np.min(stor)
-    return Epr, T
-
-def fitTwoGaussian(path, **kwargs):
-    """
-    Fit sub-Tg tan delta or loss modulus data to two Gaussian peaks.
-
-    Parameters
-    ----------
-    path : str
-        Path to DMA data file.
-    **kwargs : dict, optional
-        betaprime_ctr : float, default 25
-            Center for beta-prime peak.
-        var : str, default 'tand'
-            Variable to fit ('tand' or 'loss').
-
-    Returns
-    -------
-    popt : ndarray
-        Optimal parameters for the two Gaussian peaks.
-    """
-    betaprime_ctr = kwargs.get('betaprime_ctr', 25)
-    var = kwargs.get('var', 'tand')
-
-    if var == 'tand':
-        df = readDMA(path)
-        i_max = np.argmin(df['tand'][75:108]) + 75
-        df = df.iloc[0:i_max]
-        df['phi'] = np.rad2deg(np.arctan(df['tand']))
-
-        baseline = [
-            (df['tand'].iloc[0] +
-             ((df['tand'].iloc[-1] - df['tand'].iloc[0]) /
-              (df['temp'].iloc[-1] - df['temp'].iloc[0])) *
-             (i - df['temp'].iloc[0]))
-            for i in df['temp']
-        ]
-        tand_base = np.subtract(np.array(df['tand']), np.array(baseline))
-
-        def twoGaussian(x, *params):
-            ctr1, amp1, wid1, ctr2, amp2, wid2 = params
-            return (amp1 * np.exp(-((x - ctr1) / wid1) ** 2) +
-                    amp2 * np.exp(-((x - ctr2) / wid2) ** 2))
-
-        guess = [-60, 5e-2, 10, betaprime_ctr, 5e-2, 10]
-        popt, _ = curve_fit(twoGaussian, df['temp'], tand_base, p0=guess)
-        return popt
-
-    elif var == 'loss':
-        A = readDMA(path)
-        i_max = np.argmin(A[3][75:108]) + 75
-        temp = [T for T in A[0]][0:i_max]
-        loss = np.array(A[2][0:i_max])
-
-        baseline = [
-            (loss[0] + ((loss[-1] - loss[0]) / (temp[-1] - temp[0])) *
-             (i - temp[0]))
-            for i in temp
-        ]
-        loss_base = np.subtract(np.array(loss), np.array(baseline))
-
-        def twoGaussian(x, *params):
-            ctr1, amp1, wid1, ctr2, amp2, wid2 = params
-            return (amp1 * np.exp(-((x - ctr1) / wid1) ** 2) +
-                    amp2 * np.exp(-((x - ctr2) / wid2) ** 2))
-
-        guess = [-60, 1e8, 10, betaprime_ctr, 1e8, 10]
-        popt, _ = curve_fit(
-            twoGaussian,
-            temp,
-            loss_base,
-            p0=guess,
-            bounds=((-90, 1e6, 5, -10, 1e6, 5), (-30, 1e9, 50, 80, 1e9, 50))
-        )
-        return popt
 
     
 def fitGaussian(path, **kwargs):
