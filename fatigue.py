@@ -1,3 +1,6 @@
+# updated version of this file is maintained at
+# https://github.com/shullgroup/QBKPy/blob/main/fatigue.py
+
 import numpy as np
 import pandas as pd
 import sys
@@ -5,11 +8,14 @@ import os
 from scipy.optimize import curve_fit
 from scipy.integrate import cumulative_trapezoid
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 from scipy.signal import find_peaks
 import matplotlib.ticker as mticker
 from scipy.signal import savgol_filter
 from sympy import symbols, diff, log, sqrt, lambdify, Rational
 from copy import deepcopy
+from .utils import default_cycler
+from .fracture import KIcfx, deriv_KIcfx, P_to_K
 
 # a is the crack length
 # W is the sample width in the direction of crack propgation
@@ -234,6 +240,361 @@ def read_file(directory, df_in, row):
 
     return header, df
 
+
+def read_fatigue_CT(folder, sample_dict, **kwargs):
+    '''
+    Read fatigue data from a folder containing the tracking csv and stop csv files.
+    Designed for outputs from Instron Electropuls 10000
+    
+    Parameters
+    ----------
+    folder : Path
+        Path object to folder containing tracking and Stop csv files for a given test.
+
+    sample_dict : dict
+        Dictionary containing sample dimensions (B and W) and modulus (E)
+
+    skiprows : int, default 1
+        Number of rows to skip when reading csv files
+    
+    multistep : bool, default False
+        Flag to plot an extra step on the da/dN vs DeltaK plots
+    
+    allstep : bool, default False
+        Flag to plot all steps on the da/dN vs DeltaK plots
+    
+    Returns
+    -------
+    df : pd.DataFrame
+        DataFrame containing relevant sample data, calculated values like
+        compliance, crack lengths, crack growth rates, and stress intensities
+    
+    Notes
+    -----
+    - Uses fatigueCompliance method for calculation of values from experimental data.
+    
+    '''
+    
+
+    skiprows = kwargs.get('skiprows', 1)
+    multistep = kwargs.get('multistep', False)
+    allstep = kwargs.get('allstep', False)
+    
+    # open the folder and pull the tracking and end files
+    trackfile = list(folder.glob('*.tracking.csv'))[0]
+    endfile = list(folder.glob('*.Stop.csv'))[0]
+    files = [trackfile, endfile]
+
+    df_concat = pd.DataFrame()
+    for p in files:
+        # read data file
+        with open(p, 'r') as f:
+                df = pd.read_csv(f, delimiter=",", skiprows=skiprows,
+                                usecols=[0,2,4,6,7],
+                                names=['time','cycles','step','position','force'])
+        
+        # normalize position data make displacement
+        df = df.query('step in [2,4,6,8,10,12,14]')
+        maxstep = df['step'].max()
+        if len(df.query('step == @maxstep')['cycles']) < 10:
+            maxstep = maxstep - 2
+
+        # include extra step if failed at beginning of step
+        if multistep:
+            extrastep = maxstep - 2
+            df = df.query('step == @maxstep or step == @extrastep')
+        
+        # show all steps if interested
+        elif allstep:
+            df = df
+        
+        # otherwise just the last step (where failure occurs)
+        else:
+            df = df.query('step == @maxstep')
+
+        #normalize cycle numbers
+        df['cycles'] = df['cycles'] - min(df['cycles']) + 1
+
+        # temp arrays of position and force for conversion to displacement
+        # and building dataframe for each cycle and then concatenating into
+        # one big dataframe
+        temp_pos = []
+        temp_force = []
+        df_reduced = pd.DataFrame(columns=['cycles','position','force'])
+        #skipper = 0
+        for c in df['cycles'].unique():
+            temp_pos = df.query('cycles == @c')['position'].tolist()
+            temp_force = df.query('cycles == @c')['force'].tolist()
+            disp = [x - min(temp_pos) for x in temp_pos]
+            new_row = pd.DataFrame([{'cycles':c, 'position':temp_pos,
+                                'disp':disp, 'force':temp_force}])
+            df_reduced = pd.concat([df_reduced, new_row])
+
+        
+        #df_comp = fatigueCompliance(df_reduced, sample_dict)
+        df_concat = pd.concat([df_concat, df_reduced])
+
+    # perform compliance calculation to crack lengths
+    df = fatigue_compliance_CT(df_concat, sample_dict)
+
+    return df
+
+def CT_compliance(E, C, C_err, B):
+    '''
+    Conversion of modulus (E), compliance (C), and thickness (B) data to relative crack length (a/W)
+        for a CT specimen with displacements measured along the load line.  Equation and parameters
+        taken from ASTM E647-00 Fig A1.3
+    
+    Parameters
+    ----------
+    E : float
+        Elastic modulus of sample in MPa.
+    
+    C : float
+        Compliance (displacement/load) in mm/N
+    
+    B : float
+        Sample thickness in mm
+    
+    Returns
+    -------
+    x : float
+        Relative crack length (a/W)
+    
+    Notes
+    -----
+    - Can add uncertainty propagation at some point
+    
+    '''
+    
+    C0 = 1.0002
+    C1 = -4.0632
+    C2 = 11.242
+    C3 = -106.04
+    C4 = 464.33
+    C5 = -650.68
+
+    u = 1/(np.sqrt(E*C*B) + 1)
+
+    x = C0 + C1*u + C2*u**2 + C3*u**3 + C4*u**4 + C5*u**5
+    dxdu = C1 + 2*C2*u + 3*C3*u**2 + 4*C4*u**3 + 5*C5*u**4
+    #dudE = -(C*B*u**2)/(2*np.sqrt(E*C*B))
+    dudC = -(E*B*u**2)/(2*np.sqrt(E*C*B))
+    #dudB = -(E*C*u**2)/(2*np.sqrt(E*C*B))
+
+    #dxdE = dxdu*dudE
+    dxdC = dxdu*dudC
+    #dxdB = dxdu*dudB
+    varC = C_err**2 * dxdC**2
+    x_err = np.sqrt(varC) #add other terms if want to add their uncertainty
+
+    return x, x_err
+
+def fatigue_compliance_CT(df, sample_dict, **kwargs):
+    '''
+    Function description.
+    
+    Parameters
+    ----------
+    variable : type
+        description
+    
+    Returns
+    -------
+    variable : type
+        description
+    
+    Notes
+    -----
+    - additional notes
+    
+    '''
+    
+    
+    step_length = kwargs.get('step_length', 10000)
+    min_ratio = kwargs.get('min_ratio', 0.05)
+    max_offset = kwargs.get('max_offset', 4)
+    front_filter = kwargs.get('front_filter', 50)
+
+    # remove first few cycles from each step which are unstable
+    df = df.query('cycles > @front_filter')
+    df = df.reset_index()
+    for i in np.arange(1,8):
+        df = df.drop(df[(df.cycles > i*step_length) & (df.cycles < i*step_length + front_filter)].index)
+    
+    # drop last cycle
+    df = df.drop(df[(df.cycles == max(df.cycles))].index)
+
+    temp_C = []
+    temp_C_err = []
+    temp_Pmin = []
+    temp_Pmax = []
+    for c in df['cycles']:
+        # pull force and displacement for each cycle
+        disp = df.query('cycles == @c')['disp'].iloc[0]
+        force = df.query('cycles == @c')['force'].iloc[0]
+
+        # get min and max forces for Delta K calculations later
+        temp_Pmin.append(min(force))
+        temp_Pmax.append(max(force))
+
+        #filter force-displacement data for linear fitting for compliance
+        min_i = round(min_ratio*len(disp))
+        max_i = force.index(max(force)) - max_offset
+        disp_filt = disp[min_i:max_i]
+        force_filt = force[min_i:max_i]
+
+        p, V = np.polyfit(force_filt, disp_filt, 1, cov=True)
+
+        temp_C.append(p[0])
+        temp_C_err.append(np.sqrt(np.diag(V))[0])
+
+    df['C'] = temp_C
+    df['C_err'] = temp_C_err
+    df['Pmin'] = temp_Pmin
+    df['Pmax'] = temp_Pmax
+    B = np.mean(sample_dict['B'])
+    W = np.mean(sample_dict['W'])
+
+    # smooth the compliance values to reduce noise
+    # uses a Savitsky-Golay filter of length 5 and degree 1
+    df['C_smooth'] = savgol_filter(df['C'].to_numpy(),
+                                   window_length=5, polyorder=1)
+
+    df['alpha'], df['alpha_err'] = CT_compliance(sample_dict['E'], df['C_smooth'], 
+                                                 df['C_err'], B)
+    
+    #df['alpha_window'] = savgol_filter(df['alpha'].to_numpy(), 
+    #                                   window_length=9, polyorder=2)
+    df['a'] = df['alpha']*W
+    df['a_err'] = df['alpha_err']*W
+    df['Kmin'] = P_to_K(df['Pmin'], B, W, df['alpha'])
+    df['Kmax'] = P_to_K(df['Pmax'], B, W, df['alpha'])
+    df['DeltaK'] = df['Kmax'] - df['Kmin']
+
+
+    da = np.diff(df['a'])
+    dN = np.diff(df['cycles'])
+    dadN = [x/y for x,y in zip(da,dN)]
+
+    numerator = [i**2 + j**2 for i,j in zip(df['a_err'],df['a_err'].shift(-1))]
+    vardadN = [x/y**2 for x,y in zip(numerator,dN)]
+    dadN_err = np.sqrt(vardadN).tolist()
+
+    df['dadN'] = [np.nan] + dadN
+    df['dadN_err'] = [np.nan] + dadN_err
+
+    df = df.dropna().query('dadN > 0')
+
+    #df['dadN_log'] = np.log(df['dadN'])
+    #df['dadN_log_smooth'] = savgol_filter(df['dadN_log'].to_numpy(),
+    #                                      window_length=9, polyorder=2)
+    #df['dadN_smooth'] = np.exp(df['dadN_log_smooth'])
+
+    #print(df['a'].iloc[-1] - df['a'].iloc[0])
+    #print(simpson(df['dadN'], df['cycles']))
+
+    # add uncertainties
+
+
+    return df
+
+def fatigue_plot_CT(df, **kwargs):
+
+    detailed = kwargs.get('detailed', False)
+    min_speed = kwargs.get('min_speed', 5e-5)
+    title = kwargs.get('title', None)
+    savepath = kwargs.get('savepath', None)
+
+    # collect maximum delta K as upper bound
+    Kc = max(df['DeltaK'])
+
+    # use minimum crack speed to collect threshold K
+    try:
+        thr_cycle = df.query('dadN < @min_speed')['cycles'].iloc[-1]
+    except IndexError:
+        thr_cycle = 0
+    Kthr = df.query('cycles > @thr_cycle')['DeltaK'].iloc[0]
+
+    fit_df = df.query('DeltaK > @Kthr')
+    fit_df = fit_df.query('DeltaK < @Kc')
+
+    def parisLaw(k, A, m):
+        return A*k**m
+
+    popt, pcov = curve_fit(parisLaw, fit_df['DeltaK'], fit_df['dadN'],
+                            p0=[1e-5, 20],
+                            bounds=([0,1],[10,40]))
+    
+    A, m = popt
+    A_err, m_err = np.sqrt(np.diag(pcov))
+
+    fitK = np.arange(Kthr, Kc, 0.01)
+    fitdadN = parisLaw(fitK, A, m)
+
+    if detailed:
+
+        fig, ax = plt.subplots(1,3, figsize=(12,3), constrained_layout=True)
+        ax[1].set_prop_cycle(default_cycler)
+        ax[2].set_prop_cycle(default_cycler)
+        
+        # cycles force-displacement plot
+        norm = mpl.colors.Normalize(vmin=min(df['cycles']), vmax=max(df['cycles']))
+        cmap = mpl.colormaps['magma']
+        ax[0].set_xlabel('Displacement (mm)')
+        ax[0].set_ylabel('Force (N)')
+        ax[0].set_xlim([-0.025, 1.1*max(df['disp'].iloc[-1])])
+
+        for c in df['cycles']:
+            ax[0].plot(df.query('cycles == @c')['disp'].iloc[0],
+                       df.query('cycles == @c')['force'].iloc[0],
+                       color=cmap(norm(c)))
+        
+        # add colorbar
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+        sm._A = []
+        cb = plt.colorbar(sm, ax=ax[0], cmap=cmap, norm=norm, label='Cycle')
+    
+        # crack length vs. cycles plot
+
+        ax[1].plot(df['cycles'], df['a'], 'o')
+        ax[1].set_xlabel('Cycles')
+        ax[1].set_ylabel('Crack Length, a (mm)')
+
+        #da/dN vs. DeltaK plot
+        ax[2].loglog(df['DeltaK'], df['dadN'], 'o')
+        ax[2].set_xlabel('$\\Delta$K (MPa$\\sqrt{m}$)')
+        ax[2].xaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
+        ax[2].xaxis.set_minor_formatter(mpl.ticker.ScalarFormatter())
+        ax[2].set_ylabel('da/dN (mm/cycle)')
+
+        ax[2].plot(fitK, fitdadN, '--', color='#000000', 
+                    label=f'm = {m:0.2f} $\\pm$ {m_err:0.2f}')
+        ax[2].legend()
+    
+    else:
+
+        fig, ax = plt.subplots(1,1, figsize=(4,3), constrained_layout=True)
+        ax.set_prop_cycle(default_cycler)
+
+        ax.loglog(df['DeltaK'], df['dadN'], 'o')
+        ax.set_xlabel('$\\Delta$K (MPa$\\sqrt{m}$)')
+        ax.xaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
+        ax.xaxis.set_minor_formatter(mpl.ticker.ScalarFormatter())
+        ax.set_ylabel('da/dN (mm/cycle)')
+
+        ax.plot(fitK, fitdadN, '--', color='#000000', 
+                label=f'm = {m:0.2f} $\\pm$ {m_err:0.2f}')
+        ax.legend()
+
+    if title:
+        plt.suptitle(title)
+    plt.show(block=False)
+
+    if savepath:
+        plt.savefig(savepath)
+
+    return m, m_err, Kthr, Kc
 
 def make_data_dict(directory, df_in, row):
     ''' Create dictionary Bose-formatted input fatigue data file specified by a

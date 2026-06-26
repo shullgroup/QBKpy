@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # updated version of this file is maintained at
-# https://github.com/shullgroup/QBKPy/blob/main/test/utils.py
+# https://github.com/shullgroup/QBKPy/blob/main/utils.py
 
 import numpy as np
 import pandas as pd

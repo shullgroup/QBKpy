@@ -1,4 +1,6 @@
-# swe.py
+# updated version of this file is maintained at
+# https://github.com/shullgroup/QBKPy/blob/main/swe.py
+
 import sympy as sp
 import numpy as np
 from sympy.physics.quantum import TensorProduct

@@ -26,6 +26,7 @@ axlabels = {'storage':r'$E^\prime$ (Pa)',
 
 #Function definitions with docstrings
 def read_DMA(path, **kwargs):
+def read_dma(path, **kwargs):
     '''
     Returns a DataFrame from DMA temp sweep experiment.
 
@@ -58,6 +59,7 @@ def read_DMA(path, **kwargs):
         target_cols = kwargs.get('target_cols', [0, 1, 2, 3])
         names = kwargs.get('names', ['temp', 'storage', 'loss', 'tand'])
         df = read_data_file(path, sep=sep, 
+        df = read_data_file(path, sep=sep, 
                           target_cols=target_cols, 
                           names=names)
 
@@ -69,6 +71,7 @@ def read_DMA(path, **kwargs):
         names = kwargs.get('names',
                            ['w','t','temp','strain','stress',
                                     'tand','storage','loss'])
+        df = read_data_file(path, sep=sep,
         df = read_data_file(path, sep=sep,
                           target_cols=target_cols,
                           names=names)
@@ -82,6 +85,7 @@ def read_DMA(path, **kwargs):
 
     return df
 	
+def read_tTS(path, **kwargs):
 def read_tTS(path, **kwargs):
     '''
     Returns a DataFrame from time-temperature superposition experiment.
@@ -105,6 +109,7 @@ def read_tTS(path, **kwargs):
                        ['w','t','temp','strain','stress',
                                 'tand','storage','loss'])
     df = read_data_file(path, sep=sep,
+    df = read_data_file(path, sep=sep,
                       target_cols=target_cols,
                       names=names)
     df['f'] = df['w']/(2*np.pi)
@@ -112,6 +117,47 @@ def read_tTS(path, **kwargs):
     return df
 
 
+
+def read_stress_relax(path, **kwargs):
+def readStressRelax_old(path, **kwargs):
+    """
+    Read stress relaxation test data from a tab-delimited file.
+
+    This function reads a text file containing stress relaxation data and
+    returns the time and modulus values as pandas Series objects.
+
+    Parameters
+    ----------
+    path : str
+        Path to the tab-delimited file containing the data.
+    **kwargs : dict, optional
+        Additional keyword arguments (currently unused).
+
+    Returns
+    -------
+    tuple of pandas.Series
+        A tuple containing:
+        - t : pandas.Series
+            Time values from the 'Step time' column.
+        - mod : pandas.Series
+            Modulus values from the 'Modulus' column.
+
+    Notes
+    -----
+    - The file is expected to have columns named 'Step time' and 'Modulus'.
+    - The second row of the file is skipped during reading (skiprows=[1]).
+
+    Example
+    -------
+    >>> t, mod = readStressRelax('data/stress_relax.txt')
+    >>> print(t.head(), mod.head())
+    """
+    with open(path, 'r') as f:
+        df = pd.read_csv(f, sep='\t', skiprows=[1])
+        t = df['Step time']
+        mod = df['Modulus']
+
+    return t, mod
 
 def read_stress_relax(path, **kwargs):
     '''
@@ -145,6 +191,7 @@ def read_stress_relax(path, **kwargs):
                        ['time', 'strain', 'stress', 'modulus', 'torque'])
 
     df = read_data_file(path, sep=sep,
+    df = read_data_file(path, sep=sep,
                       target_cols=target_cols,
                       names=names)
                      
@@ -153,6 +200,7 @@ def read_stress_relax(path, **kwargs):
     
     return df
 
+def plot_stress_relax(*arg, **kwargs):
 def plot_stress_relax(*arg, **kwargs):
 
     """
@@ -202,6 +250,7 @@ def plot_stress_relax(*arg, **kwargs):
 
     fig, ax = plt.subplots(1, 1, figsize=(4, 3), constrained_layout=True)
     # Apply custom cycler to the specific axes
+    ax.set_prop_cycle(default_cycler)
     ax.set_prop_cycle(default_cycler)
 
     a = 0
@@ -677,6 +726,7 @@ def fit_VFT(aT_in, **kwargs):
         ax = kwargs.get('ax')
         # Apply custom cycler to the specific axes
         ax.set_prop_cycle(default_cycler)
+        ax.set_prop_cycle(default_cycler)
         # Plot aT vs. T
         ax.set_xlabel('T ($^{\\circ}$C)')
         ax.set_ylabel(r'$a_T$')
@@ -720,6 +770,7 @@ def Tg_DMA(B, Tinf, Tref, tau_ref, tau):
     return soln['x']
     
 def fit_arrhenius(aT, **kwargs):
+def fit_arrhenius(aT, **kwargs):
     """
     Fit time–temperature superposition (TTS) shift factors to Arrhenius form
     and plot aT vs. temperature.
@@ -762,6 +813,7 @@ def fit_arrhenius(aT, **kwargs):
     # Plot aT vs. T
     fig, ax = plt.subplots(1, 1, figsize=(4, 3), constrained_layout=True)
     # Apply custom cycler to the specific axes
+    ax.set_prop_cycle(default_cycler)
     ax.set_prop_cycle(default_cycler)
 
     ax.set_xlabel('Temperature ($^{\\circ}$C)')
@@ -853,6 +905,7 @@ def E_A_VFT(T, B, Tinf, **kwargs):
 
 
 def fit_power_law(df, **kwargs):
+def fit_power_law(df, **kwargs):
     """
     Fit modulus and time values to a power-law model.
 
@@ -872,6 +925,7 @@ def fit_power_law(df, **kwargs):
 
     fig, ax = plt.subplots(1, 1, figsize=(4, 3), constrained_layout=True)
     # Apply custom cycler to the specific axes
+    ax.set_prop_cycle(default_cycler)
     ax.set_prop_cycle(default_cycler)
 
     ax.set_xlabel('Time (s)')
@@ -908,6 +962,7 @@ def fit_power_law(df, **kwargs):
     ax.legend()
     return plt.show()
 
+def fit_maxwell(df, **kwargs):
 def fit_maxwell(df, **kwargs):
     '''
     Performs fit of Maxwell model (exponential decay) to time and modulus data 
@@ -999,6 +1054,7 @@ def fit_maxwell(df, **kwargs):
         
     return tau, tau_err
 
+def fit_KWW(df, **kwargs):
 def fit_KWW(df, **kwargs):
     """
     Fit stress relaxation data to a stretched exponential (KWW) model.
@@ -1118,7 +1174,7 @@ def fit_KWW(df, **kwargs):
 
     return G0, tau, avgtau, avgtau_err, beta
 
-def fitFracMaxwell(df, **kwargs):
+def fit_frac_maxwell(df, **kwargs):
     """
     Fit stress relaxation data to a fractional Maxwell model.
 
@@ -1199,7 +1255,7 @@ def fitFracMaxwell(df, **kwargs):
         print('The exponents must be between 0 and 1.')
 
     # Define fractional Maxwell model
-    def fracMaxwell(time, G, a, V, b):
+    def frac_maxwell(time, G, a, V, b):
         prefactor = [G * t ** (-b) for t in time]
         MLtime = [(-G / V) * t ** (a - b) for t in time]
         MLa = a - b
@@ -1218,6 +1274,7 @@ def fitFracMaxwell(df, **kwargs):
 
     # Apply custom cycler to the specific axes
     ax.set_prop_cycle(default_cycler)
+    ax.set_prop_cycle(default_cycler)
 
     ax.set_xlabel('Time / $a_T$ (s)' if tts else 'Time (s)')
     ax.set_ylabel('G(t) / $b_T$ (Pa)' if tts else 'Relaxation Modulus G(t)')
@@ -1229,7 +1286,7 @@ def fitFracMaxwell(df, **kwargs):
         b = 0
         berr = 0
         popt, pcov = curve_fit(
-            lambda time, G, a, V: fracMaxwell(time, G, a, V, b),
+            lambda time, G, a, V: frac_maxwell(time, G, a, V, b),
             df['time'], df['modulus'],
             p0=[Gguess, aguess, Vguess],
             bounds=([1e4, 0.3, 1e4], [1e9, 1, 1e11])
@@ -1241,7 +1298,7 @@ def fitFracMaxwell(df, **kwargs):
         a = 1
         aerr = 0
         popt, pcov = curve_fit(
-            lambda time, G, V, b: fracMaxwell(time, G, a, V, b),
+            lambda time, G, V, b: frac_maxwell(time, G, a, V, b),
             df['time'], df['modulus'],
             p0=[Gguess, Vguess, bguess],
             bounds=([1e4, 1e4, 0], [1e9, 1e11, 0.5])
@@ -1251,7 +1308,7 @@ def fitFracMaxwell(df, **kwargs):
 
     else:
         popt, pcov = curve_fit(
-            fracMaxwell,
+            frac_maxwell,
             df['time'], df['modulus'],
             p0=[Gguess, aguess, Vguess, bguess],
             bounds=([1e4, 0.3, 1e4, 0], [1e9, 1, 1e11, 0.2])
@@ -1283,7 +1340,7 @@ def fitFracMaxwell(df, **kwargs):
     # Plot fit
     tfit = np.logspace(np.log10(min(df['time'])),
                        np.log10(max(df['time'])), 100)
-    modfit = fracMaxwell(tfit, G, a, V, b)
+    modfit = frac_maxwell(tfit, G, a, V, b)
     ax.loglog(tfit, modfit, '--', linewidth=2,
               markevery=10, label=fitlabel)
 
@@ -1302,6 +1359,7 @@ def fitFracMaxwell(df, **kwargs):
 
 
 
+def find_Tg(temp, data):
 def find_Tg(temp, data):
     """
     Return the glass transition temperature (Tg) using the maximum of

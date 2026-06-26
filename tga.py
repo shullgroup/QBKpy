@@ -1,5 +1,5 @@
 # updated version of this file is maintained at
-# https://github.com/shullgroup/QBKPy/blob/main/test/tga.py
+# https://github.com/shullgroup/QBKPy/blob/main/tga.py
 
 import numpy as np
 import pandas as pd
@@ -8,9 +8,9 @@ import matplotlib.pyplot as plt
 from scipy.signal import savgol_filter
 from scipy.optimize import curve_fit
 
-from .utils import readDataFile, DEFAULT_CYCLER
+from .utils import read_data_file, default_cycler
 from .graphics import double_headed_arrow, vline
-from .models import fitGaussian as _fit_gauss_gen
+from .models import fit_gaussian as _fit_gauss_gen
 
 def readTGA(path, **kwargs):
     '''
@@ -38,9 +38,9 @@ def readTGA(path, **kwargs):
     target_cols = kwargs.get('target_cols', [1, 2, 4])
     names = kwargs.get('names', ['time', 'temp', 'wt'])
 
-    df = readDataFile(path, sep=sep,
-                      target_cols=target_cols,
-                      names=names)
+    df = read_data_file(path, sep=sep,
+                        target_cols=target_cols,
+                        names=names)
 
     # convert to wt%
     df['wt_pct'] = df['wt']/df['wt'].iloc[0]*100
@@ -101,6 +101,7 @@ def plotTGA(df, **kwargs):
     #typical TGA plot, annotate Td5%, option for Td1%
     if not ax:
         fig, ax = plt.subplots(1,1, figsize=(4,3), constrained_layout=True)
+        ax.set_prop_cycle(default_cycler)
         ax.set_xlabel('Temperature ($^\\circ$C)')
         ax.set_ylabel('Weight %')
         ax.set_ylim([0,105])
