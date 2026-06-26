@@ -26,7 +26,6 @@ axlabels = {'storage':r'$E^\prime$ (Pa)',
 
 #Function definitions with docstrings
 def read_DMA(path, **kwargs):
-def read_dma(path, **kwargs):
     '''
     Returns a DataFrame from DMA temp sweep experiment.
 
@@ -59,7 +58,6 @@ def read_dma(path, **kwargs):
         target_cols = kwargs.get('target_cols', [0, 1, 2, 3])
         names = kwargs.get('names', ['temp', 'storage', 'loss', 'tand'])
         df = read_data_file(path, sep=sep, 
-        df = read_data_file(path, sep=sep, 
                           target_cols=target_cols, 
                           names=names)
 
@@ -71,7 +69,6 @@ def read_dma(path, **kwargs):
         names = kwargs.get('names',
                            ['w','t','temp','strain','stress',
                                     'tand','storage','loss'])
-        df = read_data_file(path, sep=sep,
         df = read_data_file(path, sep=sep,
                           target_cols=target_cols,
                           names=names)
@@ -85,7 +82,6 @@ def read_dma(path, **kwargs):
 
     return df
 	
-def read_tTS(path, **kwargs):
 def read_tTS(path, **kwargs):
     '''
     Returns a DataFrame from time-temperature superposition experiment.
@@ -109,55 +105,12 @@ def read_tTS(path, **kwargs):
                        ['w','t','temp','strain','stress',
                                 'tand','storage','loss'])
     df = read_data_file(path, sep=sep,
-    df = read_data_file(path, sep=sep,
                       target_cols=target_cols,
                       names=names)
     df['f'] = df['w']/(2*np.pi)
         
     return df
 
-
-
-def read_stress_relax(path, **kwargs):
-def readStressRelax_old(path, **kwargs):
-    """
-    Read stress relaxation test data from a tab-delimited file.
-
-    This function reads a text file containing stress relaxation data and
-    returns the time and modulus values as pandas Series objects.
-
-    Parameters
-    ----------
-    path : str
-        Path to the tab-delimited file containing the data.
-    **kwargs : dict, optional
-        Additional keyword arguments (currently unused).
-
-    Returns
-    -------
-    tuple of pandas.Series
-        A tuple containing:
-        - t : pandas.Series
-            Time values from the 'Step time' column.
-        - mod : pandas.Series
-            Modulus values from the 'Modulus' column.
-
-    Notes
-    -----
-    - The file is expected to have columns named 'Step time' and 'Modulus'.
-    - The second row of the file is skipped during reading (skiprows=[1]).
-
-    Example
-    -------
-    >>> t, mod = readStressRelax('data/stress_relax.txt')
-    >>> print(t.head(), mod.head())
-    """
-    with open(path, 'r') as f:
-        df = pd.read_csv(f, sep='\t', skiprows=[1])
-        t = df['Step time']
-        mod = df['Modulus']
-
-    return t, mod
 
 def read_stress_relax(path, **kwargs):
     '''
@@ -191,7 +144,6 @@ def read_stress_relax(path, **kwargs):
                        ['time', 'strain', 'stress', 'modulus', 'torque'])
 
     df = read_data_file(path, sep=sep,
-    df = read_data_file(path, sep=sep,
                       target_cols=target_cols,
                       names=names)
                      
@@ -200,7 +152,7 @@ def read_stress_relax(path, **kwargs):
     
     return df
 
-def plot_stress_relax(*arg, **kwargs):
+
 def plot_stress_relax(*arg, **kwargs):
 
     """
@@ -770,7 +722,6 @@ def Tg_DMA(B, Tinf, Tref, tau_ref, tau):
     return soln['x']
     
 def fit_arrhenius(aT, **kwargs):
-def fit_arrhenius(aT, **kwargs):
     """
     Fit time–temperature superposition (TTS) shift factors to Arrhenius form
     and plot aT vs. temperature.
@@ -905,7 +856,6 @@ def E_A_VFT(T, B, Tinf, **kwargs):
 
 
 def fit_power_law(df, **kwargs):
-def fit_power_law(df, **kwargs):
     """
     Fit modulus and time values to a power-law model.
 
@@ -962,7 +912,6 @@ def fit_power_law(df, **kwargs):
     ax.legend()
     return plt.show()
 
-def fit_maxwell(df, **kwargs):
 def fit_maxwell(df, **kwargs):
     '''
     Performs fit of Maxwell model (exponential decay) to time and modulus data 
@@ -1054,7 +1003,6 @@ def fit_maxwell(df, **kwargs):
         
     return tau, tau_err
 
-def fit_KWW(df, **kwargs):
 def fit_KWW(df, **kwargs):
     """
     Fit stress relaxation data to a stretched exponential (KWW) model.
@@ -1358,8 +1306,6 @@ def fit_frac_maxwell(df, **kwargs):
     return tau, tauerr
 
 
-
-def find_Tg(temp, data):
 def find_Tg(temp, data):
     """
     Return the glass transition temperature (Tg) using the maximum of
