@@ -233,6 +233,140 @@ def plot_stress_relax(*arg, **kwargs):
 def plot_tTS(df, ax, prop, **kwargs):
     """
     Plot time–temperature superposition (TTS) data and return global bounds.
+    """
+
+    title = kwargs.get('title', '')
+    tempstep = kwargs.get('tempstep', 2.5)
+    aT = kwargs.get('aT', None)
+    bT = kwargs.get('bT', None)
+    xmult = float(kwargs.get('xmult', 1.0))
+    show_cbar = bool(kwargs.get('colorbar', True))
+    flat_color = kwargs.get('color', 'C0')
+
+    def _factors_to_dict(factors, key_name):
+        if factors is None:
+            return None
+        if isinstance(factors, dict):
+            return factors
+        if hasattr(factors, 'columns'):
+            if 'temp' not in factors.columns or key_name not in factors.columns:
+                raise ValueError(
+                    "Shift factor DataFrame must have 'temp' and '{}'.".format(
+                        key_name
+                    )
+                )
+            return dict(zip(factors['temp'], factors[key_name]))
+        raise TypeError(
+            "{} must be dict or DataFrame with 'temp' and '{}'.".format(
+                key_name, key_name
+            )
+        )
+
+    aT = _factors_to_dict(aT, 'aT') if aT is not None else None
+    bT = _factors_to_dict(bT, 'bT') if bT is not None else None
+
+    Tmin = float(np.round(np.nanmin(df['temp']), 0))
+    Tmax = float(np.round(np.nanmax(df['temp']), 0))
+    num_temps = int(np.round((Tmax - Tmin) / tempstep, 0) + 1)
+
+    # Use actual temperatures present in aT (or fallback to linspace)
+    if aT is not None:
+        temps = np.array(sorted(aT.keys()), dtype=float)
+    else:
+        temps = np.linspace(Tmin, Tmax, num_temps)
+
+    base_cmap = plt.cm.magma
+    colors = base_cmap(np.linspace(0, 1, len(temps)))
+    cmap = mpl.colors.ListedColormap(colors)
+
+    # Build boundaries so each temperature gets its own bin
+    bounds = np.zeros(len(temps) + 1)
+    bounds[1:-1] = 0.5 * (temps[:-1] + temps[1:])
+    bounds[0] = temps[0] - (bounds[1] - temps[0])
+    bounds[-1] = temps[-1] + (temps[-1] - bounds[-2])
+
+    norm = mpl.colors.BoundaryNorm(bounds, cmap.N)
+
+    # Map temperature → color
+    temp_to_color = {t: colors[i] for i, t in enumerate(temps)}
+
+    if aT is None:
+        aT = {t: 1.0 for t in temps}
+    if bT is None:
+        bT = {t: 1.0 for t in temps}
+
+    x_min, x_max = np.inf, -np.inf
+    y_min, y_max = np.inf, -np.inf
+
+    if 'aT' not in df.columns:
+        df.insert(3, 'aT', np.nan)
+    if 'faT' not in df.columns:
+        df.insert(4, 'faT', np.nan)
+    df['faT'] = np.nan
+
+    for t in temps:
+        subset = df.query('temp > @t - 0.5 and temp < @t + 0.5')
+        if t not in aT or t not in bT:
+            continue
+        
+        idx = subset.index
+        df.loc[idx, 'aT'] = aT[t]
+        df.loc[idx, 'waT'] = df.loc[idx, 'w'] * aT[t]
+        df.loc[idx, 'faT'] = df.loc[idx, 'f'] * aT[t]
+
+        x_vals = (subset['f'].to_numpy(dtype=float) *
+                  xmult * float(aT[t]))
+        y_vals = subset[prop].to_numpy(dtype=float) * float(bT[t])
+
+        valid = (np.isfinite(x_vals) & np.isfinite(y_vals) &
+                 (x_vals > 0) & (y_vals > 0))
+        if not np.any(valid):
+            continue
+
+        xv = x_vals[valid]
+        yv = y_vals[valid]
+
+        color = flat_color if not show_cbar else temp_to_color[t]
+
+        ax.loglog(xv, yv, '.-', ms=10, lw=3, color=color)
+
+        x_min = min(x_min, float(np.nanmin(xv)))
+        x_max = max(x_max, float(np.nanmax(xv)))
+        y_min = min(y_min, float(np.nanmin(yv)))
+        y_max = max(y_max, float(np.nanmax(yv)))
+
+    if show_cbar:
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+        plt.colorbar(
+            sm, ax=ax, cmap=cmap, norm=norm,
+            boundaries=bounds, ticks=temps,
+            label='Temperature ($^{\\circ}$C)'
+        )
+
+    ax.set_title(title)
+    if 'aT' not in kwargs:
+        ax.set_xlabel(r'$f$ (s$^{-1}$)')
+    else:
+        ax.set_xlabel(r'$f a_T$ (s$^{-1}$)')
+    ax.set_ylabel(prop)
+    if 'axlabels' in globals() and prop in axlabels:
+        ax.set_ylabel(axlabels[prop])
+    else:
+        ax.set_ylabel(prop)
+
+    has_pts = (np.isfinite(x_min) and np.isfinite(x_max) and
+               np.isfinite(y_min) and np.isfinite(y_max))
+    return (df.dropna(), {
+        'x_min': None if not has_pts else x_min,
+        'x_max': None if not has_pts else x_max,
+        'y_min': None if not has_pts else y_min,
+        'y_max': None if not has_pts else y_max,
+    })
+
+
+def plot_tTS_old(df, ax, prop, **kwargs):
+    """
+    Plot time–temperature superposition (TTS) data and return global bounds.
 
     This function creates log-log plots of a viscoelastic property (e.g.,
     storage modulus, loss modulus, tan delta) versus frequency for multiple
