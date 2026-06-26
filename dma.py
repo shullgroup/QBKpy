@@ -14,7 +14,7 @@ from scipy.special import digamma
 from pymittagleffler import mittag_leffler
 
 from utils import read_data_file, default_cycler
-from models import Gaussian, Arrhenius, VFT
+from models import gaussian, arrhenius, vft
 from graphics import double_headed_arrow, vline
 
 
