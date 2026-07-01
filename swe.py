@@ -278,17 +278,24 @@ mu_tt_sym = modulus((0, 1))
 E_ll_sym = modulus((2, 2))
 sigma_l_sym = stress((2,2))[2,2].subs(delta, 1)
 #sigma_l_sym = mu_tl_sym - mu_lt_sym - gives same result as above
-phi_i_sym = mu_lt_sym/mu_tt_sym-1
-zeta_i_sym = sp.Rational(1,4)*(E_ll_sym/mu_tt_sym-3)
+
+phi_i_sym = mu_lt/mu_tt-1
+zeta_i_sym = sp.Rational(1,4)*(E_ll/mu_tt-3)
+
+phi_i_sym_expanded = mu_lt_sym/mu_tt_sym-1
+zeta_i_sym_expanded = sp.Rational(1,4)*(E_ll_sym/mu_tt_sym-3)
 
 
 # these functions for mu_SH and mu_SV are the  new simplified versions, but
 # are equivalent to what is in the paper
 
-mu_SH = (mu_tt*(1+phi_i)+sigma_l)*(sp.cos(theta))**2+mu_tt*(sp.sin(theta))**2
+mu_SH = mu_tt*(1+phi_i*(sp.cos(theta))**2)+sigma_l*(sp.cos(theta))**2
 
 mu_SV = (mu_tt*(1+phi_i+(zeta_i-phi_i)*(sp.sin(2*theta))**2)+
                   sigma_l*((sp.cos(theta))**2-sp.Rational(1,2)*(sp.sin(2*theta))**2))
+
+mu_SH_sym = mu_SH.subs(phi_i, phi_i_sym).subs(zeta_i, zeta_i_sym)
+mu_SV_sym = mu_SV.subs(phi_i, phi_i_sym).subs(zeta_i, zeta_i_sym)
 
 
 def lambdify2(function, xvars, parms):
