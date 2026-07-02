@@ -6,11 +6,18 @@ import numpy as np
 import pandas as pd
 import csv
 from cycler import cycler
+from matplotlib.ticker import FuncFormatter, MaxNLocator
+from matplotlib import rcParams
+from pathlib import Path
+
 
 # Shared across the library
-default_cycler = cycler(color=[
-    '#0093F5', '#F08E2C', '#000000', '#424EBD', '#B04D25', '#75CA85', '#C892D6'
-]*3, linestyle=['-']*7 + ['--']*7 + [':']*7)
+default_cycler = cycler(color=['#0093F5', '#F08E2C', '#000000', '#424EBD', 
+                               '#B04D25', '#75CA85', '#C892D6']*3, 
+                        linestyle=['-']*7 + ['--']*7 + [':']*7)
+
+def set_default_cycler(cycler=default_cycler):   
+    rcParams['axes.prop_cycle'] = cycler
 
 def is_numeric(cell):
     '''
@@ -81,7 +88,7 @@ def first_line(path, **kwargs):
             df = pd.read_excel(path, header=None)
             for i, row in df.iterrows():
                 cells = row.tolist()
-                if all(pd.isna(c) or str(c).strip() == "" for c in cells):
+                if not all(isinstance(x, (int, float)) for x in cells):
                     continue
 
                 if target_cols is not None:
@@ -160,10 +167,7 @@ def remove_step_lines(df):
 
     return df
 
-from pathlib import Path
 
-import pandas as pd
-from pathlib import Path
 
 def read_data_file(path, **kwargs):
     """
@@ -190,7 +194,8 @@ def read_data_file(path, **kwargs):
             path,
             usecols=target_cols,
             names=names,
-            skiprows=skiprows
+            skiprows=skiprows,
+            header=None
         )
 
     # ------------------------------------------------------------
@@ -487,3 +492,79 @@ def downsample_df_per_decade(
     ordered_idx.sort()
 
     return df.iloc[ordered_idx].copy()
+
+
+def baseline_correct(df, x_col, y_col, x_range=None):
+    """
+    Apply linear baseline correction to q vs temp using two anchor temperatures.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+    y : str
+        Name of y data column
+    x_col : str
+        Name of a data column
+    x_range : list or tuple (t1, t2)
+        Two x values used to determine baseline
+
+    Returns
+    -------
+    df_out : pandas.DataFrame
+        Copy of dataframe with added 'y_corrected' column
+    """
+
+    if x_range is None or len(x_range) != 2:
+        raise ValueError("x_range must be a two-element list or tuple")
+
+    x1, x2 = x_range
+
+    # Select rows at (or nearest to) the two temperatures
+    idx1 = (df[x_col] - x1).abs().idxmin()
+    idx2 = (df[x_col] - x2).abs().idxmin()
+
+    # Extract anchor points
+    x = df.loc[[idx1, idx2], x_col].values
+    y = df.loc[[idx1, idx2], y_col].values
+
+    # Fit line (slope m, intercept b)
+    m, b = np.polyfit(x, y, 1)
+
+    # Compute baseline for all temps
+    baseline = m * df[x_col] + b
+
+    # Subtract baseline
+    df_out = df.copy()
+    df_out[y_col] = df[y_col] - baseline
+
+    return df_out
+
+
+def add_scaled_right_axis(ax, factor, label, precision=1):
+    """
+    Create a right-side twin axis whose scale is linearly related
+    to the left axis by a user-specified factor.
+
+    Right axis value = Left axis value * factor
+    """
+    ax_right = ax.twinx()
+
+    # Format ticks on the right axis
+    ax_right.yaxis.set_major_formatter(
+        FuncFormatter(lambda y, _: f"{y:.{precision}f}")
+    )
+    ax_right.set_ylabel(label)
+
+    # --- Synchronize limits dynamically ---
+    def sync_right_axis(ax):
+        left_min, left_max = ax.get_ylim()
+        ax_right.set_ylim(left_min * factor, left_max * factor)
+
+    # Initial sync
+    sync_right_axis(ax)
+
+    # Sync whenever the left axis changes (zoom/pan)
+    ax.callbacks.connect("ylim_changed", sync_right_axis)
+
+    return ax_right
+

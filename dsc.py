@@ -2,199 +2,168 @@
 # https://github.com/shullgroup/QBKPy/blob/main/dsc.py
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 
 from scipy.signal import savgol_filter
-from scipy.optimize import curve_fit
 
-from utils import read_data_file, default_cycler
+from utils import (read_data_file, default_cycler, baseline_correct, 
+                   add_scaled_right_axis)
 from graphics import double_headed_arrow, vline
 from models import fit_gaussian as _fit_gauss_gen
 
-def read_DSC(path, **kwargs):
-    '''
+labels = {'temp': r'Temperature ($^\circ$C)',
+          'time': r'Time (min.)',
+          'power': r'Heat Flow (Watts$\cdot$g$^{-1}$)',
+          'cp': r'$C_p$ (J$\cdot$g$^{-1}\cdot$K$^{-1}$)',
+          'dPdT': '$dP/dT$ (Watts$\cdot$K$^{-1}$g$^{-1}$)'}
+
+def read_dsc(path, mode='conv', apply_savgol=True, savgol_window=151,
+             savgol_polyorder=4, n_crit=50, **kwargs):
+    """
     Read txt file from DSC experiment and convert to a DataFrame.
     Supports both conventional ('conv') and modulated ('mdsc') modes.
-    
+
     Parameters
     ----------
     path : Path
-        Path object to the .txt file containing the DSC data
+        Path object to the .txt file containing the DSC data.
     mode : str, default 'conv'
-        Flag for mode of DSC, i.e. conventional (conv) vs. modulated (mdsc)
+        'conv' for conventional DSC, 'mdsc' for modulated DSC.
     apply_savgol : bool, default True
-        Option to apply the Savitsky-Golay filter, especially useful
-        for the derivatives.
+        Apply Savitzky–Golay smoothing to temp and power.
     savgol_window : int, default 151
-        Window length for filtering derivative data. Must be odd int.
+        Window length for Savitzky–Golay filter (must be odd).
     savgol_polyorder : int, default 4
-        Polynomial degree for filtering derivative data. Must be 
-        less than window length.
-    sep : str, default '\t'
-        Delimiter for the data file.
-    
+        Polynomial order for Savitzky–Golay filter.
+    n_crit : int, default 50
+        Number of consecutive slope points used for segmentation.
+    **kwargs : dict
+        Optional keyword arguments such as:
+        - sep : delimiter for input file
+        - time_to_sec : convert minutes → seconds
+
     Returns
     -------
     df : pd.DataFrame
-        DataFrame containing relevant experimental data. 
-        For 'conv': [time, temp, q, dqdT]
-        For 'mdsc': [time, temp, q_rev, q_non, dq_revdT]
-    '''
-    mode = kwargs.get('mode', 'conv')
-    apply_savgol = kwargs.get('apply_savgol', True)
-    savgol_window = kwargs.get('savgol_window', 151)
-    savgol_polyorder = kwargs.get('savgol_polyorder', 4)
-    
+        Cleaned and optionally smoothed DSC data.
+    """
 
     sep = kwargs.get('sep', '\t')
+
     # Determine columns based on mode
     if mode == 'mdsc':
         target_cols, names = [0, 1, 2, 3, 7], ['time', 'temp', 'q_rev', 'q_non', 'dq_revdT']
     else:
-        target_cols, names = [0, 1, 2], ['time', 'temp', 'q']
+        target_cols, names = [0, 1, 2], ['time', 'temp_in', 'power_in']
 
     df = read_data_file(path, sep=sep,
-                      target_cols=target_cols,
-                      names=names)
+                        target_cols=target_cols,
+                        names=names)
 
-    # Standardize Time (minutes to seconds)
-    if kwargs.get('time_to_sec', True):
+    # Convert time if requested
+    if kwargs.get('time_to_sec', False):
         df['time'] = df['time'] * 60
 
-    # Handle Derivatives for conventional mode
+    # Conventional DSC derivative
     if mode == 'conv':
-        try:
-            df['dqdT'] = np.gradient(df['q'], df['temp'])
-        except:
-            df['dqdT'] = np.nan
-        
+        df = df.dropna(subset=['temp_in', 'power_in'])
 
-    # apply Savitsky-Golay filter to smooth data
-    # because normally very coarse/jumpy directly from instrument
-    if apply_savgol:
-        # use reversing heat flow if mDSC
-        q_to_smooth = 'q_rev' if mode == 'mdsc' else 'q'
-        dq_to_smooth = 'dq_revdT' if mode == 'mdsc' else 'dqdT'
-        
-        df[q_to_smooth] = savgol_filter(df[q_to_smooth], savgol_window, savgol_polyorder)
-        df[dq_to_smooth] = savgol_filter(df[dq_to_smooth], savgol_window, savgol_polyorder)
+    # Apply Savitzky–Golay smoothing and insert columns in correct positions
+    if mode == 'conv' and apply_savgol:
+        # smoothed power and temp
+        power_smoothed = savgol_filter(df['power_in'], savgol_window, savgol_polyorder)
+        temp_smoothed = savgol_filter(df['temp_in'], savgol_window, savgol_polyorder)
+    
+        # Insert smoothed power right after 'power_in'
+        power_pos = df.columns.get_loc('power_in') + 1
+        df.insert(power_pos, 'power', power_smoothed)
+    
+        # Insert smoothed temp right after 'temp_in'
+        temp_pos = df.columns.get_loc('temp_in') + 1
+        df.insert(temp_pos, 'temp', temp_smoothed)
+    
+        # --- NEW: derivative dPdT from smoothed curves ---
+        dPdT = np.gradient(power_smoothed, temp_smoothed)
+    
+        # Insert dPdT right after the smoothed power column
+        dPdT_pos = df.columns.get_loc('power') + 1
+        df.insert(dPdT_pos, 'dPdT', dPdT)
 
     return df
 
-def plot_DSC(df, **kwargs):
+
+def plot_dsc(df_in, ax, xdata, ydata, **kwargs):
     '''
     Generate typical plots for DSC experiments. Emphasis primarily placed
     on finding Tg as opposed to other transitions for now.
 
     Parameters
     ----------
-    df : pd.DataFrame
+    df_in : pd.DataFrame
         DataFrame containing experimental data read in from the readDSC function
+    ax : mpl.axes.Axes, default None
+            Axes for the heat flow if one already exists.
     mode : str, default 'conv'
         DSC mode used for experiment. Options are 'conv' for conventional DSC
         or 'mdsc' for temperature modulated DSC.
-    ax : mpl.axes.Axes, default None
-        Axes for the heat flow if one already exists.
-    twin : mpl.axes.Axes, default None
-        Twin axis for the derivative data if one already exists.
-    title : str, default None
-        Title for the plot.
-    savepath : Path, default None
-        Path for saving the plot.
-    min_temp : float, default None
-        Minimum temperature for the plot range.
-    max_temp : float, default None
-        Maximum temperature for the plot range.
+
+    baseline : list of two numbers
+        x vlues to use for baseline correction
+    lablel : string, default ''
+        legend label, default '' gives no label
+    deriv_plot : bool, deault False
+        option to put the dQ/dT on a twinned right axis
     showTg : bool, default True
-        Option to show Tg fit from fitGaussianDSC.
-    no_legend : bool, default False
-        Option to remove legend.
-    legendloc : int or str, default 0
-        Location of legend.
-    legendsize : float, default 10.
-        Size of legend.
-    show_deriv_ticks : bool, default False
-        Option to show the tick marks on the twin axis.
+        Option to show Tg fit from fit_gaussian.
     orientation : str, default 'exo_up'
         Orientation for heat flow annotation ('exo_up' or 'endo_up').
+    fmt : str, default '-'
+        Format string
+    linewidth : float, default None
+        Linewidth for plot
 
     Returns
     -------
     Tg : float
         Glass transition temperature (Tg) in deg. Celsius.
-    ax : mpl.axes.Axes
-        Axes instance used for plotting the heat flow.
-    twin : mpl.axes.Axes
-        Axes instance used for plotting the derivative heat flow.
+
     '''
-    mode = kwargs.get('mode', 'conv')
-    ax = kwargs.get('ax', None)
-    twin = kwargs.get('twin', None)
-    title = kwargs.get('title', None)
-    savepath = kwargs.get('savepath', None)
-    min_temp = kwargs.get('min_temp', df['temp'].min())
-    max_temp = kwargs.get('max_temp', df['temp'].max())
-    no_legend = kwargs.get('no_legend', False)
-    legendloc = kwargs.get('legendloc', 0)
-    legendsize = kwargs.get('legendsize', 10.)
-    show_deriv_ticks = kwargs.get('show_deriv_ticks', False)
+    mode = kwargs.get('mode', 'conv')  # 'conv' is assumed now'
+    fmt = kwargs.get('fmt', '-')
+    linewidth = kwargs.get('linewidth', 1)
+
     orientation = kwargs.get('orientation', 'exo_up')
+    df = df_in.copy()
 
-    # clean up the dataframe
-    df = df.replace([np.inf, -np.inf], np.nan).dropna()
-    df = df.query('temp >= @min_temp and temp <= @max_temp')
-    
-    # Identify columns based on mode
-    q_col = 'q_rev' if mode == 'mdsc' else 'q'
-    dq_col = 'dq_revdT' if mode == 'mdsc' else 'dqdT'
-
-    # if not given an axis to plot on, make one
-    if not ax:
-        fig, ax = plt.subplots(figsize=(4,3), constrained_layout=True)
-        ax.set_xlabel('Temperature ($^\\circ$C)')
-        ax.set_ylabel('Norm. Heat Flow (W/g)')
-        ax.set_title(title)
-    
-    # Apply your custom cycler to the specific axes
-    ax.set_prop_cycle(default_cycler)
-
-    # if not given a twin axis for the derivative, make one
-    if not twin:
-        twin = ax.twinx()
-        twin.set_ylabel('Deriv. Heat Flow (W/g*$^{\\circ}$C)')
-        twin.set_prop_cycle(default_cycler)
-
-    # plot heat flow and derivative w.r.t. temperature
-    ax.plot(df['temp'], df[q_col], '-', label='Heat Flow')
-    twin.plot(df['temp'], -df[dq_col], '--', label='dq/dT')
-    
-    # Fitting
-    Tg = None
-    if kwargs.get('showTg', True):
-        # We pass the column name to fit function so it knows what to fit
-        Tg, Tg_err, dT, dT_err = fit_gaussian(df, twin, target_dq=dq_col, **kwargs)
-    
-    # add everything to the same legend unless you don't want a legend
-    if not no_legend:
-        h1, l1 = ax.get_legend_handles_labels()
-        h2, l2 = twin.get_legend_handles_labels()
-        ax.legend(handles=h1+h2, labels=l1+l2, loc=legendloc, prop={'size':legendsize})
+    # apply baseline correction if needed
+    if 'baseline' in kwargs.keys():
+        df = baseline_correct(df, 'temp', 'power', kwargs.get('baseline'))
         
+    
+    # clean up dataframe
+    df = df.replace([np.inf, -np.inf], np.nan).dropna(subset=['temp', 'power'])
+    
+    # optional temperature filtering
+    T_range = kwargs.get('T_range')
+    if T_range is not None:
+        df = df.loc[df['temp'].between(*T_range)]
+    
+    
+    # ceate axis lables
+    ax.set_xlabel(labels[xdata])
+    ax.set_ylabel(labels[ydata])
+    
+    # ax.set_prop_cycle(default_cycler)
+    ax.plot(df[xdata], df[ydata], fmt, linewidth = linewidth)
+
+           
     # add annotation for the heat flow orientation
-    if orientation == 'exo_up':
-        ax.annotate('Exo Up', (5,5), xycoords='axes points')
-    elif orientation == 'endo_up':
-        ax.annotate('Endo Up', (5,5), xycoords='axes points')
-
-    # usually don't show derivative y ticks because too crowded
-    if not show_deriv_ticks:   
-        twin.set_yticks([])
-
-    # save plot if given path
-    if savepath:
-        plt.savefig(savepath)
-
-    return Tg, ax, twin
+    if ydata == 'power':
+        if orientation == 'exo_up':
+            ax.annotate('Exo Up', (5,5), xycoords='axes points')
+        elif orientation == 'endo_up':
+            ax.annotate('Endo Up', (5,5), xycoords='axes points')
+    
+    return df
 
 
 def fit_gaussian(df: pd.DataFrame, ax, **kwargs):
@@ -210,12 +179,13 @@ def fit_gaussian(df: pd.DataFrame, ax, **kwargs):
         DataFrame containing DSC data.
     ax : mpl.axes.Axes
         Axes object to plot Gaussian fit on.
-    target_dq : str, default 'dqdT'
-        The column name of the derivative data to fit.
-    **kwargs:
-        Additional keyword arguments passed to `fitGaussian_general`.
-        These can include `guess`, `bounds` (to override defaults), `sigma`,
-        `absolute_sigma`, `maxfev`, etc.
+    x_col : string, default 'temp'
+        x column for data
+    y_col : string, default 'dPdT'
+        y column for data
+    peak_direction : string (either 'max' or 'min')
+        direction of peak
+
 
     Returns
     -------
@@ -231,8 +201,9 @@ def fit_gaussian(df: pd.DataFrame, ax, **kwargs):
         Uncertainty in dT fit in deg. C. Returns np.nan if fit fails.
     """
     # DSC-specific column names and parameters
-    dsc_x_col = 'temp' 
-    dsc_y_col = kwargs.pop('target_dq', 'dqdT') # 'dqdT' is the default target derivative column
+    dsc_x_col = kwargs.pop('x_col', 'temp')
+    dsc_y_col = kwargs.pop('y_col', 'dPdT') # 'dqdT' is the default target derivative column
+    peak_direction = kwargs.get('peak_direction', 'min')
     
     # DSC-specific default bounds (if not provided in kwargs)
     dsc_bounds = kwargs.pop('bounds', ([-100, 0, 0, -1], [200, 1, 30, 1]))
@@ -248,7 +219,7 @@ def fit_gaussian(df: pd.DataFrame, ax, **kwargs):
         y_col=dsc_y_col,
         ax=ax,
         bounds=dsc_bounds,
-        peak_direction='min', # DSC derivative peaks are typically negative
+        peak_direction=peak_direction, 
         plot_label_formatter=dsc_label_formatter,
         **kwargs # Pass remaining kwargs like guess, sigma, maxfev etc.
     )
@@ -257,61 +228,99 @@ def fit_gaussian(df: pd.DataFrame, ax, **kwargs):
     Tg, Tg_err, dT, dT_err = ctr, ctr_err, wid, wid_err
     return Tg, Tg_err, dT, dT_err
 
-# def fitGaussian_old(df, ax, **kwargs):
-#     # CHANGE THIS TO UTILIZE GENERALIZED fitGaussian FUNCTION IN MODELS
-#     '''
-#     Fits data to single Gaussian peak and adds to DSC plot
 
-#     Parameters
-#     ----------
-#     df : pd.DataFrame
-#         DataFrame containing DSC data.
-#     ax : mpl.axes.Axes
-#         Axes object to plot Gaussian fit on. Typically twin from DSC plot.
-#     target_dq : str, default 'dqdT'
-#         The column name of the derivative data to fit.
-#     bounds : tuple, default ([-100,0,0,-1],[200,1,30,1])
-#         Bounds for the fitting parameters.
-#     guess : list, default Calculated based on peak min
-#         Initial guess (p0) for fitting.
+def find_monotonic_segments(df, frac_thresh=0.05, n_crit=50, ax=None):
+    """
+    Identify increasing/decreasing segments lasting at least n_crit rows.
+    Adds a 'segment' column to df indicating segment membership.
+    Constant portions receive segment = -1.
 
-#     Returns
-#     -------
-#     Tg : float
-#         Glass transition temperature from center of Gaussian fit in deg. C
-#     Tg_err : float
-#         Uncertainty in Tg fit in deg. C
-#     dT : float
-#         Breadth of glass transition from width of Gaussian fit in deg. C
-#     dT_err : float
-#         Uncertainty in dT fit in deg. C
-#     '''
-#     target_dq = kwargs.get('target_dq', 'dqdT')
-#     bounds = kwargs.get('bounds', ([-100,0,0,-1],[200,1,30,1]))
+    Returns a dictionary keyed by segment number:
+        - type ('increasing' or 'decreasing')
+        - s (start index)
+        - e (end index)
+        - ramp_rate
+        - idxvals (array of indices in the segment)
+    """
 
-#     # gaussian with baseline y0
-#     def Gaussian(x, ctr, amp, wid, y0):
-#         return y0 + amp * np.exp(-((x - ctr) / (2 * wid)) ** 2)
+    slope = np.gradient(df['temp'].values, df['time'].values)
 
-#     # clean up dataframe a bit
-#     df = df.replace([np.inf, -np.inf], np.nan).dropna()
-    
-#     # find peak in derivative (min because negative usually)
-#     peak_idx = df[target_dq].idxmin()
-#     guess = kwargs.get('guess', [df.loc[peak_idx, 'temp'], 3e-2, 10, 0])
-    
-#     try:
-#         popt, pcov = curve_fit(Gaussian, df['temp'], -df[target_dq], p0=guess, bounds=bounds)
-#         perr = np.sqrt(np.diag(pcov))
-        
-#         fit_temp = np.linspace(df['temp'].min(), df['temp'].max(), 1000)
-#         fit_curve = Gaussian(fit_temp, *popt)
-        
-#         # plot the fit
-#         ax.plot(fit_temp, fit_curve, ':', color='k',
-#                 label=f'T$_g = {popt[0]:0.1f} ^\\circ$C \n $\u03b4T = {popt[2]:0.1f} ^\\circ$C')
-        
-#         # return the peak center and error and the peak width and error
-#         return popt[0], perr[0], popt[2], perr[2]
-#     except Exception:
-#         return np.nan, np.nan, np.nan, np.nan
+    # dynamic threshold
+    max_slope = np.max(np.abs(slope))
+    threshold = frac_thresh * max_slope
+
+    # classify slope
+    def classify(s):
+        if abs(s) <= threshold:
+            return 'constant'
+        return 'increasing' if s > 0 else 'decreasing'
+
+    labels = np.array([classify(s) for s in slope])
+
+    # enforce minimum run length
+    final_labels = labels.copy()
+    start = 0
+    for i in range(1, len(labels) + 1):
+        if i == len(labels) or labels[i] != labels[start]:
+            run_label = labels[start]
+            run_len = i - start
+            if run_label in ('increasing', 'decreasing') and run_len < n_crit:
+                final_labels[start:i] = 'constant'
+            start = i
+
+    # --- Extract monotonic segments ---
+    segments = {}
+    seg_num = 0
+    start = 0
+
+    # initialize segment column
+    df['segment'] = -1
+
+    for i in range(1, len(final_labels) + 1):
+        if i == len(final_labels) or final_labels[i] != final_labels[start]:
+            label = final_labels[start]
+
+            if label in ('increasing', 'decreasing'):
+                s = int(start)
+                e = i - 1
+
+                segments[seg_num] = {
+                    'type': label,
+                    's': s,
+                    'e': e,
+                    'ramp_rate': (
+                        (df.temp.iloc[e] - df.temp.iloc[s]) /
+                        (df.time.iloc[e] - df.time.iloc[s])
+                    ),
+                    'idxvals': np.r_[s:e]
+                }
+
+                # assign segment number to df
+                df.loc[s:e, 'segment'] = seg_num
+                segments[seg_num]['df'] = df[df['segment'] == seg_num].copy()
+                seg_num += 1
+
+            start = i
+
+    # --- Optional plotting ---
+    if ax is not None and len(segments) > 0:
+        plot_dsc(df, ax, 'time', 'temp', fmt='--', linewidth=0.5)
+        for seg in segments.keys():
+            s = segments[seg]['s']
+            e = segments[seg]['e']
+            plot_dsc(df.iloc[s:e+1], ax, 'time', 'temp', fmt=f'C{seg}')
+        ax.legend()
+
+    return segments
+
+
+def remove_extreme_temps(df, n):
+    """
+    Remove rows where 'temp' is within n degrees of the min or max temp.
+    """
+    tmin = df['temp'].min()
+    tmax = df['temp'].max()
+
+    mask = (df['temp'] < tmin + n) | (df['temp'] > tmax - n)
+    return df.loc[~mask].copy()
+
