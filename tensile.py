@@ -6,7 +6,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 
-from .utils import read_data_file
+from .utils import set_default_cycler, read_data_file
 
 def readTensile(path, dimensions, **kwargs):
     '''
@@ -97,14 +97,6 @@ def readTensile(path, dimensions, **kwargs):
                                 target_cols=target_cols,
                                 names=names)
 
-        if 'kN' in df['force_N'].iloc[0]:
-             df = df.rename(columns={'force_N': 'force_kN'})
-             df = df.drop([0]).astype(float)
-             df['force_N'] = df['force_kN'] * 1000
-        
-        else:
-             df = df.drop([0]).astype(float)
-
     #filter out data after failure
     Pmax = max(df['force_N'])
     disp_max = df.query('force_N == @Pmax')['disp'].iloc[0]
@@ -178,6 +170,7 @@ def plotTensile(*df, **kwargs):
         fig, ax = plt.subplots(1,1, figsize=(4,3), constrained_layout=True)
         ax.set_title(title)
 
+    set_default_cycler()
     for i in np.arange(len(df)):
         if labels:
             ax.plot(df[i]['strain'], df[i]['stress'], 
@@ -202,8 +195,7 @@ def plotTensile(*df, **kwargs):
 
     if savepath:
          plt.savefig(savepath)
-    
-    plt.show(block=False)
+
      
     return
 
