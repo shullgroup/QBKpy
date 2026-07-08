@@ -1,0 +1,144 @@
+# ##########################################################
+# Anton Paar Rheometer Data Standardization Mapping Registry
+# ##########################################################
+# This configuration maps raw rheology export column names to 
+# standardized database properties, while ensuring all numeric
+# values scale dynamically to absolute SI metric targets.
+
+# numpy constants can be writen as np.[constant] e.g.: np.pi
+
+# ##########################################################
+
+["Point No."]
+raw_name = "Point No."
+raw_unit = ""
+standard_name = "point_number"
+short_name = ""
+si_unit = ""
+
+["Status"]
+raw_name = "Status"
+raw_unit = ""
+standard_name = "status"
+short_name = ""
+si_unit = ""
+
+["Time [min]"]
+raw_name = "Time"
+raw_unit = "[min]"
+standard_name = "time"
+short_name = ""
+si_unit = "s"
+convert_expr = 'x * 60.0' # Scales minutes to seconds
+
+["Temperature [°C]"]
+raw_name = "Temperature"
+raw_unit = "[°C]"
+standard_name = "temperature"
+short_name = ""
+si_unit = "K"
+convert_expr = 'x + 273.15' # Applies linear absolute offset (Celsius to Kelvin)
+
+# --- Kinematic & Frequency Parameters ---
+
+["Frequency [Hz]"]
+raw_name = "Frequency"
+raw_unit = "[Hz]"
+standard_name = "frequency"
+short_name = ""
+si_unit = "Hz"
+
+["Angular Frequency [rad/s]"]
+raw_name = "Angular Frequency"
+raw_unit = "[rad/s]"
+standard_name = "angular_frequency"
+short_name = ""
+si_unit = "rad/s"
+
+["Phase Shift Angle [°]"]
+raw_name = "Phase Shift Angle"
+raw_unit = "[°]"
+standard_name = "phase_angle"
+short_name = ""
+si_unit = "rad"
+convert_expr = 'x * (np.pi / 180.0)' # Vectorized degrees-to-radians scaling
+
+# --- Strain & Stress Parameters ---
+
+["Shear Stress [Pa]"]
+raw_name = "Shear Stress"
+raw_unit = "[Pa]"
+standard_name = "shear_stress"
+short_name = ""
+si_unit = "Pa"
+
+["Shear Strain [1]"]
+raw_name = "Shear Strain"
+raw_unit = "[1]"
+standard_name = "shear_strain"
+short_name = ""
+si_unit = "1"
+
+["Shear Strain [%]"]
+raw_name = "Shear Strain"
+raw_unit = "[%]"
+standard_name = "shear_strain"
+short_name = ""
+si_unit = "1"
+convert_expr = 'x * 0.01' # Normalizes percentage scaling to a true ratio
+
+# --- Torque Scale Variants ---
+
+["Torque [mN·m]"]
+raw_name = "Torque"
+raw_unit = "[mN·m]"
+standard_name = "torque"
+short_name = ""
+si_unit = "Nm"
+convert_expr = 'x * 1e-3' # Milli-Newton-meters conversion
+
+["Torque [µN·m]"]
+raw_name = "Torque"
+raw_unit = "[µN·m]"
+standard_name = "torque"
+short_name = ""
+si_unit = "Nm"
+convert_expr = 'x * 1e-6' # Micro-Newton-meters conversion
+
+# --- Moduli & Viscosity Parameters ---
+
+["Storage Modulus [Pa]"]
+raw_name = "Storage Modulus"
+raw_unit = "[Pa]"
+standard_name = "storage_modulus"
+short_name = ""
+si_unit = "Pa"
+
+["Loss Modulus [Pa]"]
+raw_name = "Loss Modulus"
+raw_unit = "[Pa]"
+standard_name = "loss_modulus"
+short_name = ""
+si_unit = "Pa"
+
+["Loss Factor [1]"]
+raw_name = "Loss Factor"
+raw_unit = "[1]"
+standard_name = "loss_factor"
+short_name = ""
+si_unit = "1"
+
+["Complex Shear Modulus [Pa]"]
+raw_name = "Complex Shear Modulus"
+raw_unit = "[Pa]"
+standard_name = "complex_modulus"
+short_name = ""
+si_unit = "Pa"
+
+["Complex Viscosity [mPa·s]"]
+raw_name = "Complex Viscosity"
+raw_unit = "[mPa·s]"
+standard_name = "complex_viscosity"
+short_name = ""
+si_unit = "Pas"
+convert_expr = 'x * 1e-3' # Milli-Pascal-seconds to Pascal-seconds
