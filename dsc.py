@@ -2,19 +2,15 @@
 # https://github.com/shullgroup/QBKPy/blob/main/dsc.py
 import numpy as np
 import pandas as pd
-
 from scipy.signal import savgol_filter
+from utils import (read_data_file, baseline_correct)
+from models import fit_gaussian
 
-from utils import (read_data_file, default_cycler, baseline_correct, 
-                   add_scaled_right_axis)
-from graphics import double_headed_arrow, vline
-from models import fit_gaussian as _fit_gauss_gen
-
-labels = {'temp': r'Temperature ($^\circ$C)',
-          'time': r'Time (min.)',
-          'power': r'Heat Flow (Watts$\cdot$g$^{-1}$)',
+labels = {'temp': r'T ($^\circ$C)',
+          'time': r't (min.)',
+          'q': r'q (Watts$\cdot$g$^{-1}$)',
           'cp': r'$C_p$ (J$\cdot$g$^{-1}\cdot$K$^{-1}$)',
-          'dPdT': '$dP/dT$ (Watts$\cdot$K$^{-1}$g$^{-1}$)'}
+          'dqdT': '$dq/dT$ (Watts$\cdot$K$^{-1}$g$^{-1}$)'}
 
 def read_dsc(path, mode='conv', apply_savgol=True, savgol_window=151,
              savgol_polyorder=4, n_crit=50, **kwargs):
@@ -53,7 +49,7 @@ def read_dsc(path, mode='conv', apply_savgol=True, savgol_window=151,
     if mode == 'mdsc':
         target_cols, names = [0, 1, 2, 3, 7], ['time', 'temp', 'q_rev', 'q_non', 'dq_revdT']
     else:
-        target_cols, names = [0, 1, 2], ['time', 'temp_in', 'power_in']
+        target_cols, names = [0, 1, 2], ['time', 'temp_in', 'q_in']
 
     df = read_data_file(path, sep=sep,
                         target_cols=target_cols,
@@ -65,30 +61,69 @@ def read_dsc(path, mode='conv', apply_savgol=True, savgol_window=151,
 
     # Conventional DSC derivative
     if mode == 'conv':
-        df = df.dropna(subset=['temp_in', 'power_in'])
+        df = df.dropna(subset=['temp_in', 'q_in'])
 
     # Apply Savitzky–Golay smoothing and insert columns in correct positions
     if mode == 'conv' and apply_savgol:
-        # smoothed power and temp
-        power_smoothed = savgol_filter(df['power_in'], savgol_window, savgol_polyorder)
+        # smoothed q and temp
+        q_smoothed = savgol_filter(df['q_in'], savgol_window, savgol_polyorder)
         temp_smoothed = savgol_filter(df['temp_in'], savgol_window, savgol_polyorder)
     
-        # Insert smoothed power right after 'power_in'
-        power_pos = df.columns.get_loc('power_in') + 1
-        df.insert(power_pos, 'power', power_smoothed)
+        # Insert smoothed q right after 'q_in'
+        q_pos = df.columns.get_loc('q_in') + 1
+        df.insert(q_pos, 'q', q_smoothed)
     
         # Insert smoothed temp right after 'temp_in'
         temp_pos = df.columns.get_loc('temp_in') + 1
         df.insert(temp_pos, 'temp', temp_smoothed)
     
-        # --- NEW: derivative dPdT from smoothed curves ---
-        dPdT = np.gradient(power_smoothed, temp_smoothed)
+        # --- NEW: derivative dqdT from smoothed curves ---
+        dqdT = np.gradient(q_smoothed, temp_smoothed)
     
-        # Insert dPdT right after the smoothed power column
-        dPdT_pos = df.columns.get_loc('power') + 1
-        df.insert(dPdT_pos, 'dPdT', dPdT)
+        # Insert dqdT right after the smoothed q column
+        dqdT_pos = df.columns.get_loc('q') + 1
+        df.insert(dqdT_pos, 'dqdT', dqdT)
 
     return df
+
+
+def read_segmented_dsc(
+    path,
+    mode='conv',
+    apply_savgol=True,
+    savgol_window=151,
+    savgol_polyorder=4,
+    frac_thresh=0.05,
+    n_crit=50,
+    **kwargs
+):
+    """
+    Read a multi‑sheet XLS file where each sheet contains DSC data.
+    For each sheet:
+        1. Run read_dsc‑like preprocessing
+        2. Run find_monotonic_segments
+    Returns a dict keyed by sheet name:
+        {
+            sheet_name: {
+                'df': cleaned dataframe,
+                'segments': segment dictionary
+            }
+        }
+    """
+
+
+    dfs = read_data_file(
+        path,
+        sheet_name=None,
+        usecols=[0, 1, 2],
+        names=['time', 'temp_in', 'q_in']
+    )
+    
+    df = pd.concat(dfs.values(), ignore_index=True)
+
+
+    return df
+
 
 
 def plot_dsc(df_in, ax, xdata, ydata, **kwargs):
@@ -136,11 +171,10 @@ def plot_dsc(df_in, ax, xdata, ydata, **kwargs):
 
     # apply baseline correction if needed
     if 'baseline' in kwargs.keys():
-        df = baseline_correct(df, 'temp', 'power', kwargs.get('baseline'))
-        
+        df = baseline_correct(df, xdata, ydata, kwargs.get('baseline'))
     
     # clean up dataframe
-    df = df.replace([np.inf, -np.inf], np.nan).dropna(subset=['temp', 'power'])
+    df = df.replace([np.inf, -np.inf], np.nan).dropna(subset=['temp', 'q'])
     
     # optional temperature filtering
     T_range = kwargs.get('T_range')
@@ -157,7 +191,7 @@ def plot_dsc(df_in, ax, xdata, ydata, **kwargs):
 
            
     # add annotation for the heat flow orientation
-    if ydata == 'power':
+    if ydata == 'q':
         if orientation == 'exo_up':
             ax.annotate('Exo Up', (5,5), xycoords='axes points')
         elif orientation == 'endo_up':
@@ -166,12 +200,13 @@ def plot_dsc(df_in, ax, xdata, ydata, **kwargs):
     return df
 
 
-def fit_gaussian(df: pd.DataFrame, ax, **kwargs):
+def fit_gaussian_dsc(df: pd.DataFrame, ax, **kwargs):
     """
     Fits DSC derivative data to a single Gaussian peak (for Glass Transition).
 
     This function utilizes the general `fitGaussian_general` to perform the fitting,
     providing DSC-specific column names, default bounds, and ensuring a 'min' peak direction.
+    The fitting function is baseline + amp * np.exp(-((x - ctr)**2) / (2 * wid**2))
 
     Parameters
     ----------
@@ -181,11 +216,14 @@ def fit_gaussian(df: pd.DataFrame, ax, **kwargs):
         Axes object to plot Gaussian fit on.
     x_col : string, default 'temp'
         x column for data
-    y_col : string, default 'dPdT'
+    y_col : string, default 'dqdT'
         y column for data
     peak_direction : string (either 'max' or 'min')
         direction of peak
-
+    baseline : list or tuple of two flots
+        Temperatures to use for baseline subtraction (default None)
+    T_range : list or tuple of two floats 
+        Temperature range for fitting the Gaussian (default baseline)
 
     Returns
     -------
@@ -202,22 +240,26 @@ def fit_gaussian(df: pd.DataFrame, ax, **kwargs):
     """
     # DSC-specific column names and parameters
     dsc_x_col = kwargs.pop('x_col', 'temp')
-    dsc_y_col = kwargs.pop('y_col', 'dPdT') # 'dqdT' is the default target derivative column
-    peak_direction = kwargs.get('peak_direction', 'min')
+    dsc_y_col = kwargs.pop('y_col', 'dqdT') # 'dqdT' is the default target derivative column
+    peak_direction = kwargs.pop('peak_direction', 'min')
+    baseline = kwargs.pop('baseline', None)
     
     # DSC-specific default bounds (if not provided in kwargs)
-    dsc_bounds = kwargs.pop('bounds', ([-100, 0, 0, -1], [200, 1, 30, 1]))
+    dsc_bounds = kwargs.pop('bounds', ([-100, 0, 0], [200, 1, 30]))
+    T_range = kwargs.pop('T_range', baseline)
     
     # Custom plot label formatter for DSC data
     def dsc_label_formatter(ctr, wid):
         return f'T$_g = {ctr:0.1f} ^\\circ$C \n $\u03b4T = {wid:0.1f} ^\\circ$C'
 
     # Call the general fitGaussian function
-    ctr, ctr_err, wid, wid_err = _fit_gauss_gen(
+    ctr, ctr_err, wid, wid_err = fit_gaussian(
         df,
         x_col=dsc_x_col,
         y_col=dsc_y_col,
         ax=ax,
+        baseline = baseline,
+        x_range = T_range,
         bounds=dsc_bounds,
         peak_direction=peak_direction, 
         plot_label_formatter=dsc_label_formatter,
