@@ -12,12 +12,13 @@ from pathlib import Path
 
 
 # Shared across the library
-default_cycler = cycler(color=['#0093F5', '#F08E2C', '#000000', '#424EBD', 
+cyclers = {'broderick':cycler(color=['#0093F5', '#F08E2C', '#000000', '#424EBD', 
                                '#B04D25', '#75CA85', '#C892D6']*3, 
-                        linestyle=['-']*7 + ['--']*7 + [':']*7)
+                        linestyle=['-']*7 + ['--']*7 + [':']*7),
+           'anisha':cycler(color=['purple', '#F28C28', '#D291BC'])}
 
-def set_default_cycler(cycler=default_cycler):   
-    rcParams['axes.prop_cycle'] = cycler
+def set_default_cycler(cycler=['broderick']):   
+    rcParams['axes.prop_cycle'] = cyclers[cycler]
 
 def is_numeric(cell):
     '''
@@ -180,6 +181,7 @@ def read_data_file(path, **kwargs):
     ext = path.suffix.lower()
 
     sep = kwargs.get('sep', '\t')
+    sheet_name = kwargs.get('sheet_name', None)
     target_cols = kwargs.get('target_cols', [0, 1])
     names = kwargs.get('names', ['col1', 'col2'])
 
@@ -195,7 +197,8 @@ def read_data_file(path, **kwargs):
             usecols=target_cols,
             names=names,
             skiprows=skiprows,
-            header=None
+            header=None,
+            sheet_name = sheet_name
         )
 
     # ------------------------------------------------------------

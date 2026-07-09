@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
+import utils
 
 # universal gas constant
 R = 8.3145
@@ -33,15 +34,20 @@ def gaussian(x, ctr, amp, wid, baseline=0):
     array_like
         The y-values corresponding to the Gaussian function.
     """
-    return baseline + amp * np.exp(-((x - ctr)**2) / (2 * wid**2))
+    
+    return amp * np.exp(-((x - ctr)**2) / (2 * wid**2))
+    # we use baseline_correct so that the y values from the peak are assumed 
+    # to be zero
 
 def fit_gaussian(
     df: pd.DataFrame,
     x_col: str,
     y_col: str,
     ax=None,
+    baseline = None,
     guess: list = None,
     bounds: tuple = None,
+    x_range: tuple = None,
     sigma=None,
     absolute_sigma: bool = False,
     peak_direction: str = 'max', # 'max' or 'min' for auto-guessing and y-inversion
@@ -61,12 +67,16 @@ def fit_gaussian(
         Column name for the y-axis data (dependent variable).
     ax : mpl.axes.Axes, optional
         Axes object to plot Gaussian fit on. If None, no plot is generated.
+    baseline : list or tuple two floats
+        X axis values used to establish baseline
+    x_range : list or tuple of two floats
+        X axis range for which fit will be attempted defaults to baseline
     guess : list, optional
         Initial guess (p0) for fitting parameters [center, amplitude, width, baseline].
         If None, an automatic guess is attempted based on peak_direction.
     bounds : tuple, optional
-        Bounds for the fitting parameters: ([lower_ctr, lower_amp, lower_wid, lower_baseline],
-        [upper_ctr, upper_amp, upper_wid, upper_baseline]).
+        Bounds for the fitting parameters: ([lower_ctr, lower_amp, lower_wid],
+        [upper_ctr, upper_amp, upper_wid]).
         If None, very broad default bounds are used.
     sigma : array_like or None, optional
         Determines the uncertainty in ydata.
@@ -97,10 +107,19 @@ def fit_gaussian(
 
     # 1. Data Cleaning
     df_clean = df.replace([np.inf, -np.inf], np.nan).dropna(subset=[x_col, y_col]).copy()
+    
     if df_clean.empty:
         print("Warning: DataFrame is empty after cleaning. Cannot fit.")
         return np.nan, np.nan, np.nan, np.nan
     
+    df_clean = utils.baseline_correct(df_clean, x_col, y_col, x_range=baseline)
+    if x_range == 'bounds':
+        x_range = bounds
+    
+    if x_range != None:
+        xmin, xmax = x_range
+        df_clean = df_clean[(df_clean[x_col] >= xmin) & (df_clean[x_col] <= xmax)]
+
     x_data = df_clean[x_col]
     y_data = df_clean[y_col]
 
@@ -122,10 +141,8 @@ def fit_gaussian(
         if wid_auto_guess <= 0: # Avoid division by zero or non-positive width
             wid_auto_guess = 1.0 # Fallback to a small positive width
             
-        # Baseline: Average of first and last points of (potentially inverted) y_data
-        baseline_auto_guess = fit_y_data.iloc[[0, -1]].mean()
 
-        guess = [ctr_auto_guess, amp_auto_guess, wid_auto_guess, baseline_auto_guess]
+        guess = [ctr_auto_guess, amp_auto_guess, wid_auto_guess]
 
     # Default Bounds (very broad to be general)
     if bounds is None:
@@ -140,8 +157,8 @@ def fit_gaussian(
         # Broad bounds, allowing center and baseline to be outside the data range
         # Amplitude can be positive or negative, depending on peak_direction and initial guess
         bounds = (
-            [x_min - x_range*2, -np.inf, min_wid, -np.inf],  # Lower bounds
-            [x_max + x_range*2, np.inf, x_range * 2, np.inf]   # Upper bounds (width cap at 2x data range)
+            [x_min - x_range*2, -np.inf, min_wid],  # Lower bounds
+            [x_max + x_range*2, np.inf, x_range * 2]   # Upper bounds (width cap at 2x data range)
         )
 
     try:
@@ -152,8 +169,8 @@ def fit_gaussian(
         perr = np.sqrt(np.diag(pcov))
 
         # Unpack parameters and their uncertainties
-        ctr, amp_fit, wid, baseline_fit = popt
-        ctr_err, amp_err, wid_err, baseline_err = perr
+        ctr, amp_fit, wid = popt
+        ctr_err, amp_err, wid_err = perr
 
         # Generate Fit Curve for Plotting
         fit_x = np.linspace(x_data.min(), x_data.max(), num=1000)
@@ -164,7 +181,7 @@ def fit_gaussian(
         if peak_direction == 'min':
             plot_amp = -amp_fit
 
-        fit_y = gaussian(fit_x, ctr, plot_amp, wid, baseline_fit)
+        fit_y = gaussian(fit_x, ctr, plot_amp, wid)
 
         # Plot if ax is provided
         if ax:
