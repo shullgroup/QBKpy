@@ -8,7 +8,7 @@ from scipy.optimize import curve_fit
 
 from .utils import set_default_cycler, read_data_file
 
-def readTensile(path, dimensions, **kwargs):
+def read_tensile(path, dimensions, **kwargs):
     '''
     Read uniaxial tensile testing data and convert to DataFrame.
     
@@ -138,7 +138,7 @@ def readTensile(path, dimensions, **kwargs):
 
     return df
 
-def plotTensile(*df, **kwargs):
+def plot_tensile(*df, **kwargs):
     '''
     Function description.
     
@@ -199,7 +199,7 @@ def plotTensile(*df, **kwargs):
      
     return
 
-def plotMR(df, **kwargs):
+def plot_mr(df, **kwargs):
     # Work in progress
 
     def linear(x, m, b):
