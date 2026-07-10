@@ -17,8 +17,8 @@ cyclers = {'broderick':cycler(color=['#0093F5', '#F08E2C', '#000000', '#424EBD',
                         linestyle=['-']*7 + ['--']*7 + [':']*7),
            'anisha':cycler(color=['purple', '#F28C28', '#D291BC'])}
 
-def set_default_cycler(cycler=['broderick']):   
-    rcParams['axes.prop_cycle'] = cyclers[cycler]
+def set_default_cycler(cycler=cyclers['broderick']):   
+    rcParams['axes.prop_cycle'] = cycler
 
 def is_numeric(cell):
     '''
