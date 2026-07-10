@@ -4,7 +4,7 @@
 import numpy as np
 import pandas as pd
 
-from .utils import default_cycler, read_data_file
+from .utils import read_data_file
 
 def read_kic(path, **kwargs):
 

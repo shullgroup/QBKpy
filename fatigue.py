@@ -14,7 +14,7 @@ import matplotlib.ticker as mticker
 from scipy.signal import savgol_filter
 from sympy import symbols, diff, log, sqrt, lambdify, Rational
 from copy import deepcopy
-from .utils import default_cycler
+from .utils import set_default_cycler
 from .fracture import KIcfx, deriv_KIcfx, P_to_K
 
 # a is the crack length
@@ -294,7 +294,7 @@ def read_fatigue_CT(folder, sample_dict, **kwargs):
                                 names=['time','cycles','step','position','force'])
         
         # normalize position data make displacement
-        df = df.query('step in [2,4,6,8,10,12,14]')
+        df = df.query('step in [2,4,6,8,10,12,14]').copy()
         maxstep = df['step'].max()
         if len(df.query('step == @maxstep')['cycles']) < 10:
             maxstep = maxstep - 2
@@ -302,7 +302,7 @@ def read_fatigue_CT(folder, sample_dict, **kwargs):
         # include extra step if failed at beginning of step
         if multistep:
             extrastep = maxstep - 2
-            df = df.query('step == @maxstep or step == @extrastep')
+            df = df.query('step == @maxstep or step == @extrastep').copy()
         
         # show all steps if interested
         elif allstep:
@@ -310,7 +310,7 @@ def read_fatigue_CT(folder, sample_dict, **kwargs):
         
         # otherwise just the last step (where failure occurs)
         else:
-            df = df.query('step == @maxstep')
+            df = df.query('step == @maxstep').copy()
 
         #normalize cycle numbers
         df['cycles'] = df['cycles'] - min(df['cycles']) + 1
@@ -533,10 +533,8 @@ def fatigue_plot_CT(df, **kwargs):
     fitdadN = parisLaw(fitK, A, m)
 
     if detailed:
-
+        set_default_cycler()
         fig, ax = plt.subplots(1,3, figsize=(12,3), constrained_layout=True)
-        ax[1].set_prop_cycle(default_cycler)
-        ax[2].set_prop_cycle(default_cycler)
         
         # cycles force-displacement plot
         norm = mpl.colors.Normalize(vmin=min(df['cycles']), vmax=max(df['cycles']))
@@ -574,8 +572,8 @@ def fatigue_plot_CT(df, **kwargs):
     
     else:
 
+        set_default_cycler()
         fig, ax = plt.subplots(1,1, figsize=(4,3), constrained_layout=True)
-        ax.set_prop_cycle(default_cycler)
 
         ax.loglog(df['DeltaK'], df['dadN'], 'o')
         ax.set_xlabel('$\\Delta$K (MPa$\\sqrt{m}$)')
