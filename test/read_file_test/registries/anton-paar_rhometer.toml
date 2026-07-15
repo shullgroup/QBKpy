@@ -77,14 +77,14 @@ raw_name = "Shear Strain"
 raw_unit = "[1]"
 standard_name = "shear_strain"
 short_name = ""
-si_unit = "1"
+si_unit = ""
 
 ["Shear Strain [%]"]
 raw_name = "Shear Strain"
 raw_unit = "[%]"
 standard_name = "shear_strain"
 short_name = ""
-si_unit = "1"
+si_unit = ""
 convert_expr = 'x * 0.01' # Normalizes percentage scaling to a true ratio
 
 # --- Torque Scale Variants ---
@@ -101,7 +101,7 @@ convert_expr = 'x * 1e-3' # Milli-Newton-meters conversion
 raw_name = "Torque"
 raw_unit = "[µN·m]"
 standard_name = "torque"
-short_name = ""
+short_name = "M"
 si_unit = "Nm"
 convert_expr = 'x * 1e-6' # Micro-Newton-meters conversion
 
