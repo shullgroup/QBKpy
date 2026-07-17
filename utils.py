@@ -210,7 +210,9 @@ def read_data_file(path, **kwargs):
             delimiter=sep,
             skiprows=skiprows,
             usecols=target_cols,
-            names=names
+            names=names,
+            engine="python",
+            on_bad_lines="skip"
         )
 
     else:

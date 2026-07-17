@@ -13,7 +13,7 @@ from scipy.special import gamma as gammaf
 from scipy.special import digamma
 from pymittagleffler import mittag_leffler
 
-from utils import read_data_file, default_cycler
+from utils import read_data_file
 from models import gaussian, arrhenius, vft
 from graphics import double_headed_arrow, vline
 
@@ -22,7 +22,8 @@ from graphics import double_headed_arrow, vline
 axlabels = {'storage':r'$E^\prime$ (Pa)',
            'loss': r'$E^{\prime\prime}$ (Pa)',
            'phi':r'$\phi$ (deg.)',
-           'tand':r'tan($\delta$)'}
+           'tand':r'tan($\delta$)',
+           'temp':r'$T$ ($^\circ$C)'}
 
 #Function definitions with docstrings
 def read_DMA(path, **kwargs):
@@ -202,8 +203,8 @@ def plot_stress_relax(*arg, **kwargs):
 
     fig, ax = plt.subplots(1, 1, figsize=(4, 3), constrained_layout=True)
     # Apply custom cycler to the specific axes
-    ax.set_prop_cycle(default_cycler)
-    ax.set_prop_cycle(default_cycler)
+    # ax.set_prop_cycle(default_cycler)
+    # ax.set_prop_cycle(default_cycler)
 
     a = 0
     for A in arg:
@@ -229,6 +230,51 @@ def plot_stress_relax(*arg, **kwargs):
     ax.set_xlabel('Time (s)')
     ax.set_ylabel(ylabel)
     return plt.show()
+
+
+def plot_dma(df_in, ax, xdata, ydata, **kwargs):
+    '''
+    Generate generic plot from dma data. 
+
+    Parameters
+    ----------
+    df_in : pd.DataFrame
+        DataFrame containing experimental data read in from the readDSC function
+    ax : mpl.axes.Axes, default None
+            Axes for the heat flow if one already exists.
+    xdata : string
+        Column name of xdata to plot
+    ydata : string
+        Column nae of ydataa to plot
+    lablel : string, default ''
+        legend label, default '' gives no label
+     fmt : str, default '-'
+        Format string
+    linewidth : float, default None
+        Linewidth for plot
+
+    Returns
+    -------
+    No return, just plots the data
+
+    '''
+    fmt = kwargs.get('fmt', '-')
+    linewidth = kwargs.get('linewidth', 1)
+    label = kwargs.get('label', '')
+
+    df = df_in.copy()
+    
+    # optional temperature filtering
+    T_range = kwargs.get('T_range')
+    if T_range is not None:
+        df = df.loc[df['temp'].between(*T_range)]
+     
+    # ceate axis lables
+    ax.set_xlabel(axlabels[xdata])
+    ax.set_ylabel(axlabels[ydata])
+    
+    # ax.set_prop_cycle(default_cycler)
+    ax.plot(df[xdata], df[ydata], fmt, linewidth = linewidth, label=label)
 
 
 def plot_tTS(df, ax, prop, **kwargs):
@@ -346,9 +392,9 @@ def plot_tTS(df, ax, prop, **kwargs):
 
     ax.set_title(title)
     if 'aT' not in kwargs:
-        ax.set_xlabel(r'$f$ (s$^{-1}$)')
+        ax.set_xlabel(r'$f$ (s$^{\mathrm{-1}}$)')
     else:
-        ax.set_xlabel(r'$f a_T$ (s$^{-1}$)')
+        ax.set_xlabel(r'$f a_T$ (s$^{\mathrm{-1}}$)')
     ax.set_ylabel(prop)
     if 'axlabels' in globals() and prop in axlabels:
         ax.set_ylabel(axlabels[prop])
@@ -609,7 +655,9 @@ def fit_VFT(aT_in, **kwargs):
         Bguess : float, default=3000
             Initial guess for the VFT constant B.
         ax : matplotlib.axes.Axes
-        Matplotlib Axes object on which the plot will be drawn.
+        Matplotlib Axes object on which the plot will be drawn
+        label_expt : string, default 'Expt'
+            legend label for experimental points
 
     Returns
     -------
@@ -640,6 +688,7 @@ def fit_VFT(aT_in, **kwargs):
         
     title = kwargs.get('title', None)
     Bguess = kwargs.get('Bguess', 3000)
+    label_expt = kwargs.get('label_expt', 'Expt')
     
     #find referene temperature
     if isinstance(aT_in, dict):
@@ -677,12 +726,12 @@ def fit_VFT(aT_in, **kwargs):
     if 'ax' in kwargs.keys():
         ax = kwargs.get('ax')
         # Apply custom cycler to the specific axes
-        ax.set_prop_cycle(default_cycler)
-        ax.set_prop_cycle(default_cycler)
+        # ax.set_prop_cycle(default_cycler)
+        # ax.set_prop_cycle(default_cycler)
         # Plot aT vs. T
         ax.set_xlabel('T ($^{\\circ}$C)')
         ax.set_ylabel(r'$a_T$')
-        ax.semilogy(T, aT, 'o', label='Expt.')
+        ax.semilogy(T, aT, 'o', label=label_expt)
         # Plot fitted curve
         Tfit = np.linspace(min(T), max(T), 100)
         aTfit = np.exp(lnaT_VFT(Tfit, B, Tinf))
@@ -764,8 +813,8 @@ def fit_arrhenius(aT, **kwargs):
     # Plot aT vs. T
     fig, ax = plt.subplots(1, 1, figsize=(4, 3), constrained_layout=True)
     # Apply custom cycler to the specific axes
-    ax.set_prop_cycle(default_cycler)
-    ax.set_prop_cycle(default_cycler)
+    # ax.set_prop_cycle(default_cycler)
+    # ax.set_prop_cycle(default_cycler)
 
     ax.set_xlabel('Temperature ($^{\\circ}$C)')
     ax.set_ylabel(r'$a_T$')
@@ -875,8 +924,8 @@ def fit_power_law(df, **kwargs):
 
     fig, ax = plt.subplots(1, 1, figsize=(4, 3), constrained_layout=True)
     # Apply custom cycler to the specific axes
-    ax.set_prop_cycle(default_cycler)
-    ax.set_prop_cycle(default_cycler)
+    # ax.set_prop_cycle(default_cycler)
+    # ax.set_prop_cycle(default_cycler)
 
     ax.set_xlabel('Time (s)')
     ax.set_ylabel('Relaxation Modulus (Pa)')
@@ -1221,8 +1270,8 @@ def fit_frac_maxwell(df, **kwargs):
     fig, ax = plt.subplots(1, 1, figsize=(4, 3), constrained_layout=True)
 
     # Apply custom cycler to the specific axes
-    ax.set_prop_cycle(default_cycler)
-    ax.set_prop_cycle(default_cycler)
+    # ax.set_prop_cycle(default_cycler)
+    # ax.set_prop_cycle(default_cycler)
 
     ax.set_xlabel('Time / $a_T$ (s)' if tts else 'Time (s)')
     ax.set_ylabel('G(t) / $b_T$ (Pa)' if tts else 'Relaxation Modulus G(t)')

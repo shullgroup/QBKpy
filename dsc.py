@@ -9,7 +9,7 @@ from models import fit_gaussian
 labels = {'temp': r'T ($^\circ$C)',
           'time': r't (min.)',
           'q': r'q (Watts$\cdot$g$^{-1}$)',
-          'cp': r'$C_p$ (J$\cdot$g$^{-1}\cdot$K$^{-1}$)',
+          'q_r': r'$q/r$ (J$\cdot$g$^{-1}\cdot$K$^{-1}$)',
           'dqdT': '$dq/dT$ (Watts$\cdot$K$^{-1}$g$^{-1}$)'}
 
 def read_dsc(path, mode='conv', apply_savgol=True, savgol_window=151,
@@ -32,10 +32,13 @@ def read_dsc(path, mode='conv', apply_savgol=True, savgol_window=151,
         Polynomial order for Savitzky–Golay filter.
     n_crit : int, default 50
         Number of consecutive slope points used for segmentation.
+    columns : list of integers
+        Columns to read - defaults determined by DSC type
     **kwargs : dict
         Optional keyword arguments such as:
         - sep : delimiter for input file
         - time_to_sec : convert minutes → seconds
+
 
     Returns
     -------
@@ -50,6 +53,9 @@ def read_dsc(path, mode='conv', apply_savgol=True, savgol_window=151,
         target_cols, names = [0, 1, 2, 3, 7], ['time', 'temp', 'q_rev', 'q_non', 'dq_revdT']
     else:
         target_cols, names = [0, 1, 2], ['time', 'temp_in', 'q_in']
+        
+    
+    target_cols = kwargs.get('columns', target_cols)
 
     df = read_data_file(path, sep=sep,
                         target_cols=target_cols,
@@ -68,18 +74,24 @@ def read_dsc(path, mode='conv', apply_savgol=True, savgol_window=151,
         # smoothed q and temp
         q_smoothed = savgol_filter(df['q_in'], savgol_window, savgol_polyorder)
         temp_smoothed = savgol_filter(df['temp_in'], savgol_window, savgol_polyorder)
-    
+        
         # Insert smoothed q right after 'q_in'
         q_pos = df.columns.get_loc('q_in') + 1
         df.insert(q_pos, 'q', q_smoothed)
-    
+        
         # Insert smoothed temp right after 'temp_in'
         temp_pos = df.columns.get_loc('temp_in') + 1
         df.insert(temp_pos, 'temp', temp_smoothed)
-    
-        # --- NEW: derivative dqdT from smoothed curves ---
-        dqdT = np.gradient(q_smoothed, temp_smoothed)
-    
+        
+        # Compute dQ/dT safely
+        dt = np.gradient(temp_smoothed)
+        dq = np.gradient(q_smoothed)
+        
+        dqdT = np.full_like(q_smoothed, np.nan, dtype=float)
+        
+        valid = np.abs(dt) > 1e-12  # adjust tolerance if needed
+        dqdT[valid] = dq[valid] / dt[valid]
+        
         # Insert dqdT right after the smoothed q column
         dqdT_pos = df.columns.get_loc('q') + 1
         df.insert(dqdT_pos, 'dqdT', dqdT)
@@ -143,7 +155,7 @@ def plot_dsc(df_in, ax, xdata, ydata, **kwargs):
 
     baseline : list of two numbers
         x vlues to use for baseline correction
-    lablel : string, default ''
+    label : string, default ''
         legend label, default '' gives no label
     deriv_plot : bool, deault False
         option to put the dQ/dT on a twinned right axis
@@ -165,6 +177,7 @@ def plot_dsc(df_in, ax, xdata, ydata, **kwargs):
     mode = kwargs.get('mode', 'conv')  # 'conv' is assumed now'
     fmt = kwargs.get('fmt', '-')
     linewidth = kwargs.get('linewidth', 1)
+    label = kwargs.get('label', '')
 
     orientation = kwargs.get('orientation', 'exo_up')
     df = df_in.copy()
@@ -187,7 +200,8 @@ def plot_dsc(df_in, ax, xdata, ydata, **kwargs):
     ax.set_ylabel(labels[ydata])
     
     # ax.set_prop_cycle(default_cycler)
-    ax.plot(df[xdata], df[ydata], fmt, linewidth = linewidth)
+    ax.plot(df[xdata], df[ydata], fmt, linewidth = linewidth,
+            label = label)
 
            
     # add annotation for the heat flow orientation
