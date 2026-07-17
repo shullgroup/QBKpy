@@ -8,7 +8,7 @@ from scipy.optimize import curve_fit
 
 from .utils import set_default_cycler, read_data_file
 
-def readTensile(path, dimensions, **kwargs):
+def read_tensile(path, dimensions, **kwargs):
     '''
     Read uniaxial tensile testing data and convert to DataFrame.
     
@@ -100,11 +100,11 @@ def readTensile(path, dimensions, **kwargs):
     #filter out data after failure
     Pmax = max(df['force_N'])
     disp_max = df.query('force_N == @Pmax')['disp'].iloc[0]
-    df = df.query('disp <= @disp_max')
+    df = df.query('disp <= @disp_max').copy()
 
     #filter out data prior to tension and correct L0
     #this also tries to filter out artifacts prior to test
-    df = df.query('force_N > 0')
+    df = df.query('force_N > 0').copy()
     index_minP = df['force_N'].idxmin()
     for i in np.arange(0,index_minP):
         try:
@@ -138,7 +138,7 @@ def readTensile(path, dimensions, **kwargs):
 
     return df
 
-def plotTensile(*df, **kwargs):
+def plot_tensile(*df, **kwargs):
     '''
     Function description.
     
@@ -166,11 +166,11 @@ def plotTensile(*df, **kwargs):
     savepath = kwargs.get('savepath', None)
     ax = kwargs.get('ax', None)
      
-    if not ax:
+    set_default_cycler()
+    if ax is None:
         fig, ax = plt.subplots(1,1, figsize=(4,3), constrained_layout=True)
         ax.set_title(title)
 
-    set_default_cycler()
     for i in np.arange(len(df)):
         if labels:
             ax.plot(df[i]['strain'], df[i]['stress'], 
@@ -199,7 +199,7 @@ def plotTensile(*df, **kwargs):
      
     return
 
-def plotMR(df, **kwargs):
+def plot_mr(df, **kwargs):
     # Work in progress
 
     def linear(x, m, b):

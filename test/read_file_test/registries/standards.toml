@@ -1,0 +1,266 @@
+# =============================================================================
+# TEST METHOD - VARIABLE - SYMBOLS - UNITS
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# RHEOLOGY VARIABLES
+# -----------------------------------------------------------------------------
+[rheology.time]
+standard_name = "Time"
+short_name    = "time"
+symbol_str    = "$t$"
+si_unit       = "s"
+unit_st       = "$\\text{s}$"
+
+[rheology.temperature]
+standard_name = "Temperature"
+short_name    = "temp"
+symbol_str    = "$T$"
+si_unit       = "K"
+unit_str      = "$\\text{K}$"
+
+[rheology.angular_frequency]
+standard_name = "Angular Frequency"
+short_name    = "omega"
+symbol_str    = "$\\omega$"
+si_unit       = "rad/s"
+unit_str      = "$\\text{rad/s}$"
+
+[rheology.frequency]
+standard_name = "Frequency"
+short_name    = "freq"
+symbol_str    = "$f$"
+si_unit       = "Hz"
+unit_str      = "$\\text{Hz}$"
+
+[rheology.storage_modulus]
+standard_name = "Storage Modulus"
+short_name    = "G_prime"
+symbol_str    = "$G'$"
+si_unit       = "Pa"
+unit_str      = "$\\text{Pa}$"
+
+[rheology.loss_modulus]
+standard_name = "Loss Modulus"
+short_name    = "G_pp"
+symbol_str    = "$G''$"
+si_unit       = "Pa"
+unit_str      = "$\\text{Pa}$"
+
+[rheology.loss_factor]
+standard_name = "Loss Factor"
+short_name    = "tan_delta"
+symbol_str    = "$\\tan\\delta$"
+si_unit       = ""
+unit_str      = ""
+
+[rheology.shear_strain]
+standard_name = "Shear Strain"
+short_name    = "gamma"
+symbol_str    = "$\\gamma$"
+si_unit       = ""
+unit_str      = ""
+
+[rheology.shear_stress]
+standard_name = "Shear Stress"
+short_name    = "tau"
+symbol_str    = "$\\tau$"
+si_unit       = "Pa"
+unit_str      = "$\\text{Pa}$"
+
+[rheology.torque]
+standard_name = "Torque"
+short_name    = "M"
+symbol_str    = "$M$"
+si_unit       = "Nm"
+unit_str      = "$\\text{N}\\cdot\\text{m}$"
+
+[rheology.complex_viscosity]
+standard_name = "Complex Viscosity"
+short_name    = "eta*"
+symbol_str    = "$\\eta^*$"
+si_unit       = "Pa·s"
+unit_str      = "$\\text{Pa}\\cdot\\text{s}$"
+
+[rheology.shear_rate]
+standard_name = "Shear Rate"
+short_name    = "gamma_dot"
+symbol_str    = "$\\dot{\\gamma}$"
+si_unit       = "1/s"
+unit_str      = "$\\text{s}^{-1}$"
+
+[rheology.viscosity]
+standard_name = "Viscosity"
+short_name    = "eta"
+symbol_str    = "$\\eta$"
+si_unit       = "Pa·s"
+unit_str      = "$\\text{Pa}\\cdot\\text{s}$"
+
+
+# -----------------------------------------------------------------------------
+# DMA VARIABLES
+# -----------------------------------------------------------------------------
+[dma.displacement]
+standard_name = "Displacement"
+short_name    = "disp"
+symbol_str    = "$d$"
+si_unit       = "m"
+unit_str      = "$\\text{m}$"
+
+[dma.load]
+standard_name = "Load"
+short_name    = "load"
+symbol_str    = "$F$"
+si_unit       = "N"
+unit_str      = "$\\text{N}$"
+
+[dma.torque]
+standard_name = "Torque"
+short_name    = "torque"
+symbol_str    = "$M$"
+si_unit       = "N·m"
+unit_str      = "$\\text{N}\\cdot\\text{m}$"
+
+[dma.rotation_angle]
+standard_name = "Rotation Angle"
+short_name    = "rot"
+symbol_str    = "$\\theta$"
+si_unit       = "rad"
+unit_str      = "$\\text{rad}$"
+
+[dma.control_temperature]
+standard_name = "Control Temperature"
+short_name    = "temp_ctrl"
+symbol_str    = "$T_{\\text{ctrl}}$"
+si_unit       = "K"
+unit_str      = "$\\text{K}$"
+
+[dma.chamber_temperature]
+standard_name = "Chamber Temperature"
+short_name    = "temp_chamb"
+symbol_str    = "$T_{\\text{chamb}}$"
+si_unit       = "K"
+unit_str      = "$\\text{K}$"
+
+[dma.storage_modulus]
+standard_name = "Storage Modulus"
+short_name    = "Ep"
+symbol_str    = "$E'$"
+si_unit       = "Pa"
+unit_str      = "$\\text{Pa}$"
+
+[dma.loss_modulus]
+standard_name = "Loss Modulus"
+short_name    = "Epp"
+symbol_str    = "$E''$"
+si_unit       = "Pa"
+unit_str      = "$\\text{Pa}$"
+
+[dma.tan_delta]
+standard_name = "Tan Delta"
+short_name    = "tan_delta"
+symbol_str    = "$\\tan\\delta$"
+si_unit       = ""
+unit_str      = ""
+
+[dma.strain]
+standard_name = "Strain"
+short_name    = "epsilon"
+symbol_str    = "$\\varepsilon$"
+si_unit       = ""
+unit_str      = ""
+
+[dma.stress]
+standard_name = "Stress"
+short_name    = "sigma"
+symbol_str    = "$\\sigma$"
+si_unit       = "Pa"
+unit_str      = "$\\text{Pa}$"
+
+[dma.axial_command]
+standard_name = "Axial Command"
+short_name    = "ax_cmd"
+symbol_str    = "$u_{\\text{cmd}}$"
+si_unit       = "m"
+unit_str      = "$\\text{m}$"
+
+[dma.torsion_command]
+standard_name = "Torsion Command"
+short_name    = "tor_cmd"
+symbol_str    = "$\\theta_{\\text{cmd}}$"
+si_unit       = "rad"
+unit_str      = "$\\text{rad}$"
+
+[dma.static_force]
+standard_name = "Static Force"
+short_name    = "F_static"
+symbol_str    = "$F_{\\text{stat}}$"
+si_unit       = "N"
+unit_str      = "$\\text{N}$"
+
+[dma.dynamic_force]
+standard_name = "Dynamic Force"
+short_name    = "F_dynamic"
+symbol_str    = "$F_{\\text{dyn}}$"
+si_unit       = "N"
+unit_str      = "$\\text{N}$"
+
+[dma.frequency]
+standard_name = "Frequency"
+short_name    = "f"
+symbol_str    = "$f$"
+si_unit       = "Hz"
+unit_str      = "$\\text{Hz}$"
+
+
+# -----------------------------------------------------------------------------
+# TGA VARIABLES
+# -----------------------------------------------------------------------------
+[tga.time]
+standard_name = "Time"
+short_name    = "time"
+symbol_str    = "$t$"
+si_unit       = "s"
+unit_str      = "$\\text{s}$"
+
+[tga.temperature]
+standard_name = "Temperature"
+short_name    = "temp"
+symbol_str    = "$T$"
+si_unit       = "K"
+unit_str      = "$\\text{K}$"
+
+[tga.mass]
+standard_name = "Mass"
+short_name    = "m"
+symbol_str    = "$m$"
+si_unit       = "kg"
+unit_str      = "$\\text{kg}$"
+
+[tga.mass_change]
+standard_name = "Mass Change"
+short_name    = "del_m"
+symbol_str    = "$\\Delta m$"
+si_unit       = "kg"
+unit_str      = "$\\text{kg}$"
+
+[tga.dtg]
+standard_name = "Derivative Mass Loss (DTG)"
+short_name    = "DTG"
+symbol_str    = "$\\text{DTG}$"
+si_unit       = "kg/s"
+unit_str      = "$\\text{kg/s}$"
+
+[tga.heating_rate]
+standard_name = "Heating Rate"
+short_name    = "beta"
+symbol_str    = "$\\beta$"
+si_unit       = "K/s"
+unit_str      = "$\\text{K/s}$"
+
+[tga.purge_gas_flow]
+standard_name = "Purge Gas Flow Rate"
+short_name    = "flow_rate"
+symbol_str    = "$q$"
+si_unit       = "m³/s"
+unit_str      = "$\\text{m}^3/\\text{s}$"

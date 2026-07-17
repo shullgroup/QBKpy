@@ -11,6 +11,11 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 
+import logging
+logger = logging.getLogger(__name__)
+
+# logging.basicConfig(level=logging.INFO) 
+
 
 @dataclass
 class ColumnMapping:
@@ -22,32 +27,34 @@ class ColumnMapping:
     # A function to apply the SI transformation. Defaults to identity (no change).
     convert_fn: Callable[[pd.Series], pd.Series] = lambda x: x
 
+def current_file_directory() -> Path:
+    """
+    Returns the directory of the current script file.
+    """
+    return Path(__file__).resolve().parent
+
 
 def registry_file_path(registry_name):
     '''
     return full file path by registry_name
 
     '''
-    # Get the absolute path of the current script file
-    current_file_path = Path(__file__).resolve()
-    print(f"Current file path: {current_file_path}")
     # Get the directory containing the current script file
-    current_directory = current_file_path.parent
-    print(f"Current directory: {current_directory}")
+    current_directory = current_file_directory()
 
     # Example: Constructing a path to your TOML file in the same directory
     registry_path = current_directory/ 'registries' / f'{registry_name}.toml'
-    print(f'registry_path: {registry_path}')
+    logger.info(f'registry_path: {registry_path}')
     
     if registry_path.is_file():
-        print("The file exists!")
+        logger.info("The file exists!")
         return registry_path
     else:
-        print("File not found or the path is a directory.")
+        logger.warning("File not found or the path is a directory.")
         return None
 
 
-def load_registry_from_toml(registry_name: str) -> dict:
+def load_registry_from_toml(registry_name: str) -> dict | None:
     '''
     Loads column configuration settings from a TOML file and builds the registry.
     '''
@@ -85,7 +92,7 @@ def load_registry_from_toml(registry_name: str) -> dict:
     return registry
 
 
-def get_file_encoding(file_path: str | Path, default: str = 'utf-8') -> str:
+def get_file_encoding(file_path: str | Path = 'utf-8') -> str:
     '''
     Checks a text file for standard Byte Order Marks (BOM) to precisely 
     identify UTF encodings. Falls back to detecting cp1252/utf-8 if no BOM exists.
@@ -219,9 +226,9 @@ def get_file_config(file_path, registry_name, encoding=None, delim=None, errors=
         raise ValueError(f"Column width mismatch at the bottom of '{path.name}'.")
         
     num_columns = len(valid_bottom_rows[0])
-    print(f"Detected {num_columns} columns in '{path.name}'")
-    print(f'last row: {valid_bottom_rows[0]}')
-    print(f'lines[{i}]: {lines[i]}')
+    logger.info(f"Detected {num_columns} columns in '{path.name}'")
+    logger.info(f'last row: {valid_bottom_rows[0]}')
+    logger.info(f'lines[{i}]: {lines[i]}')
 
     # all names and units
     registered_raw_names = set()
@@ -247,8 +254,8 @@ def get_file_config(file_path, registry_name, encoding=None, delim=None, errors=
         # sliced_tokens = tokens[-num_columns:]
         # name_matches = sum(1 for t in sliced_tokens if t in registered_raw_names)
         name_matches = sum(1 for t in tokens if t in registered_raw_names)
-        print(f'{i} tokens: {tokens}')
-        print(f'{i} name_matches: {name_matches}')
+        logger.info(f'{i} tokens: {tokens}')
+        logger.info(f'{i} name_matches: {name_matches}')
         if name_matches >= 2:
             header_line_idx = i
             break
