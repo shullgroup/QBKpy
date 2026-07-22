@@ -1,6 +1,6 @@
 # %%
 import glob
-from func import *
+from test.util_test.fileManager import *
 import logging.config
 # Get the logger specified in the file
 logger = logging.getLogger(__name__)
