@@ -12,7 +12,7 @@ from .utils import read_data_file, default_cycler
 from .graphics import double_headed_arrow, vline
 from .models import fit_gaussian as _fit_gauss_gen
 
-def readTGA(path, **kwargs):
+def read_TGA(path, **kwargs):
     '''
     Read txt file from TGA experiment and convert to a DataFrame
     
@@ -51,7 +51,7 @@ def readTGA(path, **kwargs):
 
     return df
 
-def plotTGA(df, **kwargs):
+def plot_TGA(df, **kwargs):
     '''
     Plot the data from a TGA experiment.
     
