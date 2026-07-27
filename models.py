@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
-import utils
+from .utils import baseline_correct
 
 # universal gas constant
 R = 8.3145
@@ -112,7 +112,7 @@ def fit_gaussian(
         print("Warning: DataFrame is empty after cleaning. Cannot fit.")
         return np.nan, np.nan, np.nan, np.nan
     
-    df_clean = utils.baseline_correct(df_clean, x_col, y_col, x_range=baseline)
+    df_clean = baseline_correct(df_clean, x_col, y_col, x_range=baseline)
     if x_range == 'bounds':
         x_range = bounds
     
