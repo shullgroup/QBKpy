@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import savgol_filter
 from scipy.optimize import curve_fit
 
-from .utils import read_data_file, default_cycler
+from .utils import read_data_file, set_default_cycler
 from .graphics import double_headed_arrow, vline
 from .models import fit_gaussian as _fit_gauss_gen
 
@@ -46,8 +46,8 @@ def read_tga(path, **kwargs):
     df['wt_pct'] = df['wt']/df['wt'].iloc[0]*100
 
     # calculate derivative of wt and wt_pct w.r.t. temp
-    df['dwt'] = np.gradient(df['wt'], x=df['temp'])
-    df['dwt_pct'] = np.gradient(df['wt_pct'], x=df['temp'])
+    df['dwt'] = np.gradient(df['wt'], df['temp'])
+    df['dwt_pct'] = np.gradient(df['wt_pct'], df['temp'])
 
     return df
 
@@ -100,8 +100,8 @@ def plot_tga(df, **kwargs):
 
     #typical TGA plot, annotate Td5%, option for Td1%
     if not ax:
+        set_default_cycler()
         fig, ax = plt.subplots(1,1, figsize=(4,3), constrained_layout=True)
-        ax.set_prop_cycle(default_cycler)
         ax.set_xlabel('Temperature ($^\\circ$C)')
         ax.set_ylabel('Weight %')
         ax.set_ylim([0,105])
