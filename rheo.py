@@ -16,11 +16,11 @@ from scipy.special import gamma as gammaf
 from scipy.special import digamma
 from pymittagleffler import mittag_leffler
 
-from .utils import readDataFile, remove_step_lines, DEFAULT_CYCLER
+from .utils import read_data_file, remove_step_lines, set_default_cycler
 from .graphics import double_headed_arrow, vline
 from .models import Arrhenius, fitGaussian as _fit_gauss_gen
 
-def readRheo(path, **kwargs):
+def read_rheo(path, **kwargs):
     chain_time = kwargs.get('chain_time', True)
     chirp = kwargs.get('chirp', False)
 
@@ -31,9 +31,9 @@ def readRheo(path, **kwargs):
         target_cols = kwargs.get('target_cols', [0,1,2,5,6])
         names = kwargs.get('names', ['time', 'temp', 'torque',
                                      'stress', 'strain'])
-        df = readDataFile(path, sep=sep,
-                          target_cols=target_cols,
-                          names=names)
+        df = read_data_file(path, sep=sep,
+                            target_cols=target_cols,
+                            names=names)
 
         
         # remove lines if multiple steps
@@ -109,7 +109,7 @@ def readRheo(path, **kwargs):
 
     return df
 
-def plotRheo(df, **kwargs):
+def plot_rheo(df, **kwargs):
 
     yaxis = kwargs.get('yaxis', 'moduli')
     mode = kwargs.get('mode', None)
@@ -119,9 +119,9 @@ def plotRheo(df, **kwargs):
 
     # if not given an ax to plot on, make one
     if not ax:
-        fig, ax = plt.subplots(1,1, figsize=(4,3), constrained_layout=True)
         # Apply custom cycler to the specific axes
-        ax.set_prop_cycle(DEFAULT_CYCLER)
+        set_default_cycler()
+        fig, ax = plt.subplots(1,1, figsize=(4,3), constrained_layout=True)
 
         # set the title
         ax.set_title(title)
@@ -245,9 +245,9 @@ def viscosity(df, **kwargs):
         fit_temps = np.linspace(temps.min(), temps.max(), 50)
         fit_eta = Arrhenius(fit_temps+273, popt[0], popt[1])
 
-        fig, ax = plt.subplots(1,1, figsize=(4,3), constrained_layout=True)
         # Apply custom cycler to the specific axes
-        ax.set_prop_cycle(DEFAULT_CYCLER)
+        set_default_cycler()
+        fig, ax = plt.subplots(1,1, figsize=(4,3), constrained_layout=True)
 
         ax.set_xlabel('Temperature ($^{\\circ}$C)')
         ax.set_ylabel('$|\\eta^*|$ (Pa*s)')
@@ -272,7 +272,7 @@ def viscosity(df, **kwargs):
 
         return eta, eta_err
 
-def plotCure(df, **kwargs):
+def plot_cure(df, **kwargs):
 
     yaxis = kwargs.get('yaxis', 'moduli')
     ax = kwargs.get('ax', None)
@@ -280,9 +280,9 @@ def plotCure(df, **kwargs):
     titlesize = kwargs.get('titlesize', 12)
     savepath = kwargs.get('savepath', None)
 
-    fig, ax = plt.subplots(1,1, figsize=(4,3), constrained_layout=True)
     # Apply custom cycler to the specific axes
-    ax.set_prop_cycle(DEFAULT_CYCLER)
+    set_default_cycler()
+    fig, ax = plt.subplots(1,1, figsize=(4,3), constrained_layout=True)
 
     if yaxis == 'moduli':
         ax.set_xlabel('Time (min)')
@@ -312,7 +312,7 @@ def plotCure(df, **kwargs):
 
     return ax
 
-def processChirp(df, **kwargs):
+def process_chirp(df, **kwargs):
     '''
     Processes the data from a rheological chirp experiment from
     the time domain to the frequency domain.
@@ -372,7 +372,7 @@ def processChirp(df, **kwargs):
 
     return f_df
 
-def fitGaussian(df: pd.DataFrame, xprop: str, yprop: str, ax=None, **kwargs):
+def fit_gaussian(df: pd.DataFrame, xprop: str, yprop: str, ax=None, **kwargs):
     """
     Fits rheometer data to a single Gaussian peak.
 
@@ -425,77 +425,7 @@ def fitGaussian(df: pd.DataFrame, xprop: str, yprop: str, ax=None, **kwargs):
         **kwargs # Pass remaining kwargs like guess, sigma, maxfev etc.
     )
 
-def fitGaussian(df, xprop, yprop, **kwargs):
-    # CHANGE TO USE GENERALIZED fitGaussian IN MODELS
-    '''
-    Fits data to single Gaussian peak and adds to plot
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        DataFrame containing DSC data.
-    ax : mpl.axes.Axes
-        Axes object to plot Gaussian fit on.
-    return_err : bool, default False
-        Option to return uncertainties for Tg and dT
-
-    Returns
-    -------
-    ctr : float
-        Center of Gaussian fit
-    ctr_err : float
-        Uncertainty in center of Gaussian fit
-    wid : float
-        Width of Gaussian fit
-    wid_err : float
-        Uncertainty in width of Gaussian fit
-
-    '''
-    
-    ax = kwargs.get('ax', None)
-    guess = kwargs.get('guess', [100, 100, 100, 0])
-    bounds = kwargs.get('bounds', ([0,1,1,-1000],[1e5,1e5,1e4,1000]))
-    sigma = kwargs.get('sigma', None)
-    absolute_sigma = kwargs.get('absolute_sigma', False)
-
-    def Gaussian(x, *params):
-        y = np.zeros_like(x)
-        ctr = params[0]
-        amp = params[1]
-        wid = params[2]
-        y0 = params[3]
-        y = y + y0 + amp*np.exp(-((x - ctr)/(2*wid))**2)
-        return y
-
-    df.replace([np.inf, -np.inf], np.nan, inplace=True)
-    df = df.dropna()
-    
-    #guesses for Temp, amplitude, and width for peak
-    ctr_guess = df[yprop].max()
-    guess = kwargs.get('guess', [df.query(f'{yprop} == @ctr_guess')[xprop].iloc[0], 1000, 1000, 0])
-    
-    #fit function to data and plot peak
-    popt, pcov = curve_fit(Gaussian, df[xprop], df[yprop], p0=guess,
-                           bounds=bounds, sigma=sigma, 
-                           absolute_sigma=absolute_sigma, maxfev=5000)
-    fit_x = np.linspace(df[xprop].min(),df[xprop].max(),num=1000)
-    fit_y = Gaussian(fit_x, *popt)
-    ctr = popt[0]
-    wid = popt[2]
-    
-    # parameter uncertainties
-    perr = np.sqrt(np.diag(pcov))
-    ctr_err = perr[0]
-    wid_err = perr[2]
-
-    if ax:
-        ax.plot(fit_x, fit_y, ':', color='k',
-                label=f'Center = {ctr:0.0f} \n Width = {wid:0.0f}')
-        ax.legend()
-    
-    return ctr, ctr_err, wid, wid_err
-
-def plotCureDeriv(df, **kwargs):
+def plot_cure_deriv(df, **kwargs):
 
     yaxis = kwargs.get('yaxis', 'modulus')
     ax = kwargs.get('ax', None)
