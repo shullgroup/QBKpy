@@ -16,12 +16,13 @@ from scipy.special import gamma as gammaf
 from scipy.special import digamma
 from pymittagleffler import mittag_leffler
 
-from .utils import read_data_file, remove_step_lines, set_default_cycler
+from .utils import read_data_file, remove_step_lines, set_default_cycler, first_line
 from .graphics import double_headed_arrow, vline
-from .models import Arrhenius, fitGaussian as _fit_gauss_gen
+from .models import arrhenius, fit_gaussian as _fit_gauss_gen
 
 def read_rheo(path, **kwargs):
     chain_time = kwargs.get('chain_time', True)
+    step_delay = kwargs.get('step_delay', None)
     chirp = kwargs.get('chirp', False)
 
     # read if it is a windowed chirp experiment
@@ -53,17 +54,27 @@ def read_rheo(path, **kwargs):
             names = kwargs.get('names', ['storage','loss','tand',
                                         'ang_freq','torque','time',
                                         'temp','viscosity'])
+            df = read_data_file(path, sep=sep,
+                                target_cols=target_cols,
+                                names=names)
         except Exception as e:
             sep = kwargs.get('sep', '\t')
             target_cols = kwargs.get('target_cols', [0,1,2,3,4,5,6])
             names = kwargs.get('names', ['storage','loss','tand',
                                         'ang_freq','torque','time',
                                         'temp'])
+            df = read_data_file(path, sep=sep,
+                                target_cols=target_cols,
+                                names=names)
 
         # remove lines if multiple steps
         df = remove_step_lines(df)
+        df = df.dropna()
         # force numeric
         df = df.apply(pd.to_numeric, errors='coerce')
+
+        # reset index
+        df = df.reset_index(drop=True)
 
         # convert moduli to Pa from MPa
         df['storage'] = df['storage']*1e6
@@ -87,6 +98,8 @@ def read_rheo(path, **kwargs):
         # Initialize an array to hold the cumulative time offset
         time_offsets = np.zeros(len(df))
         cumulative_offset = 0
+        step_labels = np.zeros(len(df), dtype=int)
+        current_step = 0
 
         for t in range(1, len(df)):
             prev = df['time'].iloc[t-1]
@@ -95,11 +108,16 @@ def read_rheo(path, **kwargs):
             if curr < prev:
                 # Time reset detected, add the previous time to cumulative offset
                 cumulative_offset += prev
+                current_step += 1
+                if step_delay:
+                    cumulative_offset += step_delay
             time_offsets[t] = cumulative_offset
+            step_labels[t] = current_step
 
         # Add the cumulative offsets to the original time
         df['time'] = df['time'] + time_offsets
         df['time_min'] = df['time'] / 60
+        df['step'] = step_labels
     
     else:
         df['time_min'] = df['time'] / 60
@@ -237,13 +255,13 @@ def viscosity(df, **kwargs):
             eta_dict[t]['eta_err'] = np.std(df.query('temp == @t')['viscosity'])
         
         p0 = [1e-10, 50e3]
-        popt, pcov = curve_fit(Arrhenius, [t+273 for t in temps], 
+        popt, pcov = curve_fit(arrhenius, [t+273 for t in temps], 
                                [eta_dict[t]['eta'] for t in temps],
                                p0=p0)
         perr = np.sqrt(np.diag(pcov))
         
         fit_temps = np.linspace(temps.min(), temps.max(), 50)
-        fit_eta = Arrhenius(fit_temps+273, popt[0], popt[1])
+        fit_eta = arrhenius(fit_temps+273, popt[0], popt[1])
 
         # Apply custom cycler to the specific axes
         set_default_cycler()
