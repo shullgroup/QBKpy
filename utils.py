@@ -93,7 +93,9 @@ def first_line(path, **kwargs):
                     continue
 
                 if target_cols is not None:
-                    if all(is_numeric(cells[c]) for c in target_cols):
+                    # Use only the columns that actually exist in the row
+                    valid_cols = [c for c in target_cols if c < len(cleaned)]
+                    if valid_cols and all(is_numeric(cleaned[c]) for c in valid_cols):
                         return int(i)
                 else:
                     if any(is_numeric(c) for c in cells):
@@ -130,9 +132,10 @@ def first_line(path, **kwargs):
                 continue
 
             if target_cols is not None:
-                if len(cleaned) > max(target_cols):
-                    if all(is_numeric(cleaned[c]) for c in target_cols):
-                        return i
+                # Use only the columns that actually exist in the row
+                valid_cols = [c for c in target_cols if c < len(cleaned)]
+                if valid_cols and all(is_numeric(cleaned[c]) for c in valid_cols):
+                    return i
             else:
                 if any(is_numeric(cell) for cell in cleaned):
                     return i
