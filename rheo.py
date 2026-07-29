@@ -16,7 +16,7 @@ from scipy.special import gamma as gammaf
 from scipy.special import digamma
 from pymittagleffler import mittag_leffler
 
-from .utils import read_data_file, remove_step_lines, set_default_cycler, first_line
+from .utils import read_data_file, remove_step_lines, set_default_cycler
 from .graphics import double_headed_arrow, vline
 from .models import arrhenius, fit_gaussian as _fit_gauss_gen
 
