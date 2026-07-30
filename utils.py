@@ -9,7 +9,9 @@ from cycler import cycler
 from matplotlib.ticker import FuncFormatter, MaxNLocator
 from matplotlib import rcParams
 from pathlib import Path
-
+from openpyxl import load_workbook
+from scipy.interpolate import UnivariateSpline
+from scipy.signal import savgol_filter
 
 # Shared across the library
 cyclers = {'broderick':cycler(color=['#0093F5', '#F08E2C', '#000000', '#424EBD', 
@@ -19,6 +21,350 @@ cyclers = {'broderick':cycler(color=['#0093F5', '#F08E2C', '#000000', '#424EBD',
 
 def set_default_cycler(cycler='broderick'):   
     rcParams['axes.prop_cycle'] = cyclers[cycler]
+    
+
+def spline_smooth(y, smooth_factor=1.0):
+    """
+    Smooth a uniformly sampled 1-D signal using a cubic smoothing spline.
+
+    The independent variable is assumed to be the sample index
+    (0, 1, 2, ...), which is appropriate for evenly spaced data.
+    This function is useful for removing quantization or staircase
+    artifacts caused by insufficient storage precision.
+
+    Parameters
+    ----------
+    y : array-like
+        Input data values.
+
+    smooth_factor : float, optional
+        Controls the amount of smoothing. Larger values produce
+        smoother results.
+
+        Rough guidelines:
+            0.0   -> exact interpolation (no smoothing)
+            0.1   -> light smoothing
+            1.0   -> moderate smoothing (default)
+            10.0  -> strong smoothing
+            100.0 -> very strong smoothing
+
+    Returns
+    -------
+    numpy.ndarray
+        Smoothed data evaluated at the original sample locations.
+
+    Notes
+    -----
+    Internally, the spline smoothing parameter is computed as
+
+        s = smooth_factor * len(y)
+
+    so the behavior remains reasonably consistent as the dataset size
+    changes.
+    """
+    y = np.asarray(y, dtype=float)
+    idx = np.arange(len(y))
+
+    s = smooth_factor * len(y)
+
+    spline = UnivariateSpline(idx, y, k=3, s=s)
+
+    return spline(idx)
+
+def savgol_smooth(y, window_length=11, polyorder=3):
+    """
+    Smooth a 1-D signal using a Savitzky-Golay filter while preserving
+    leading and trailing NaN regions.
+
+    Any NaNs at the beginning or end of the input are ignored when fitting.
+    The filter is applied only to the contiguous block of valid data between
+    the first and last non-NaN values. Leading and trailing NaNs are
+    retained in the output.
+
+    Parameters
+    ----------
+    y : array-like
+        Input data values.
+
+    window_length : int, optional
+        Length of the smoothing window in samples. Must be a positive
+        odd integer and greater than `polyorder`.
+
+    polyorder : int, optional
+        Degree of the polynomial fit within each window.
+
+    Returns
+    -------
+    numpy.ndarray
+        Smoothed data with leading and trailing NaNs preserved.
+    """
+    y = np.asarray(y, dtype=float)
+
+    # Output initialized to input values
+    result = y.copy()
+
+    valid = ~np.isnan(y)
+    if not np.any(valid):
+        return result
+
+    start = np.argmax(valid)
+    end = len(y) - np.argmax(valid[::-1])
+
+    segment = y[start:end]
+    n = len(segment)
+
+    # Adjust window_length if segment is shorter than requested
+    wl = min(window_length, n)
+    if wl % 2 == 0:
+        wl -= 1
+
+    if wl <= polyorder:
+        return result
+
+    result[start:end] = savgol_filter(
+        segment,
+        window_length=wl,
+        polyorder=polyorder
+    )
+
+    return result
+
+
+
+
+def savgol_interpolate(y, window_length=11, polyorder=3, sig_figs=4):
+    """
+    Smooth a uniformly sampled 1-D signal using a Savitzky-Golay
+    filter while preserving the uncertainty implied by a specified
+    number of significant figures.
+
+    The function assumes each input value is known only to the
+    precision corresponding to `sig_figs` significant figures.
+    Smoothing is automatically limited so that no smoothed value
+    differs from the original value by more than one-half of the
+    implied precision.
+
+    This is particularly useful for removing staircase artifacts
+    caused by storing data with insufficient numerical precision.
+
+    Parameters
+    ----------
+    y : array-like
+        Input data values.
+
+    window_length : int, optional
+        Initial Savitzky-Golay window length. Must be a positive odd
+        integer greater than `polyorder`.
+
+        Larger values produce stronger smoothing. If the resulting
+        smoothed values exceed the allowable precision bounds, the
+        window length is automatically reduced until an acceptable
+        solution is found.
+
+        Default is 11.
+
+    polyorder : int, optional
+        Degree of the polynomial fit within each window.
+
+        Typical values:
+
+            2  -> quadratic fit
+            3  -> cubic fit (default)
+            4  -> quartic fit
+
+        Default is 3.
+
+    sig_figs : int, optional
+        Number of significant figures represented by the input data.
+
+        Default is 4.
+
+        Examples for sig_figs=4:
+
+            137.8   -> precision = 0.1
+            17.86   -> precision = 0.01
+            1.786   -> precision = 0.001
+            0.1786  -> precision = 0.0001
+
+    Returns
+    -------
+    numpy.ndarray
+        Smoothed data evaluated at the original sample locations.
+
+    Notes
+    -----
+    The precision associated with each value is computed as
+
+        precision = 10**(floor(log10(abs(y))) - sig_figs + 1)
+
+    and the maximum permitted deviation is
+
+        precision / 2
+
+    The function searches from the requested window length toward
+    smaller window lengths and returns the smoothest result that
+    satisfies
+
+        abs(y_smooth - y) <= precision / 2
+
+    for every point. If no acceptable smoothing is found, the
+    original data are returned unchanged.
+    """
+
+    y = np.asarray(y, dtype=float)
+
+    if len(y) < polyorder + 2:
+        return y.copy()
+
+    # Precision implied by the specified number of significant figures
+    precision = np.empty_like(y)
+
+    nonzero = np.abs(y) > 0
+
+    precision[nonzero] = (
+        10.0 ** (
+            np.floor(np.log10(np.abs(y[nonzero])))
+            - sig_figs + 1
+        )
+    )
+
+    # For zero values use the smallest precision represented by
+    # the requested number of significant figures.
+    precision[~nonzero] = 10.0 ** (-sig_figs + 1)
+
+    tolerance = precision / 2
+
+    # Ensure a valid odd window length
+    max_window = min(window_length, len(y))
+    if max_window % 2 == 0:
+        max_window -= 1
+
+    min_window = polyorder + 2
+    if min_window % 2 == 0:
+        min_window += 1
+
+    # Try progressively weaker smoothing until precision limits
+    # are satisfied everywhere.
+    for wl in range(max_window, min_window - 1, -2):
+
+        y_smooth = savgol_filter(
+            y,
+            window_length=wl,
+            polyorder=polyorder,
+            mode='interp'
+        )
+
+        if np.all(np.abs(y_smooth - y) <= tolerance):
+            return y_smooth
+
+    return y.copy()
+
+
+from scipy.stats import linregress
+
+
+def local_slope(time, temp, window=101):
+    """
+    Estimate the local temperature ramp rate (dT/dt) using moving
+    linear regressions.
+
+    Unlike numerical differentiation methods such as
+    `numpy.gradient()`, which can be highly sensitive to noise and
+    quantization artifacts, this function determines the slope within
+    a sliding window by fitting a straight line to the local
+    temperature-time data. The resulting slope estimate is therefore
+    much more robust for piecewise-linear temperature programs such as
+    those commonly encountered in DSC experiments.
+
+    Each point is assigned the slope of a least-squares linear fit to
+    the neighboring data points within the specified window. For
+    points near the beginning or end of the dataset, the window is
+    automatically truncated to remain within the available data range.
+
+    Parameters
+    ----------
+    time : array-like
+        Time values. These should generally be monotonic and have the
+        same length as `temp`.
+
+    temp : array-like
+        Temperature values corresponding to `time`.
+
+    window : int, optional
+        Number of points used in each local regression.
+
+        Larger values produce smoother slope estimates and are more
+        resistant to quantization artifacts, but reduce sensitivity to
+        short-duration changes in ramp rate.
+
+        Typical values:
+
+            21   -> tracks rapid changes in slope
+            51   -> moderate smoothing
+            101  -> strong smoothing (default)
+            201  -> very smooth slope estimates
+
+        The value should generally be odd so that the regression
+        window is approximately centered on each point.
+
+    Returns
+    -------
+    numpy.ndarray
+        Array of local slope estimates having the same length as the
+        input arrays.
+
+        The units are those of `temp` divided by those of `time`
+        (e.g., °C/min or °C/s).
+
+    Notes
+    -----
+    For each index i, a least-squares fit of the form
+
+        T = a + b t
+
+    is performed over a local neighborhood centered on i. The slope
+    coefficient b is returned as the local estimate of dT/dt.
+
+    This approach is particularly effective for DSC datasets because
+    temperature programs are typically composed of long linear ramp
+    segments separated by relatively few changes in heating or cooling
+    rate. Under these conditions, local linear regression generally
+    provides more reliable ramp-rate estimates than finite-difference
+    derivatives.
+
+    Examples
+    --------
+    Estimate a smooth heating rate:
+
+    >>> dTdt = local_slope(df['time'], df['temp'], window=101)
+
+    Use the resulting slopes to identify heating, cooling, and
+    isothermal segments:
+
+    >>> df['dTdt'] = local_slope(df['time'], df['temp'])
+    >>> segments = find_monotonic_segments(df)
+    """
+
+    time = np.asarray(time, dtype=float)
+    temp = np.asarray(temp, dtype=float)
+
+    n = len(time)
+    half = window // 2
+
+    slope = np.zeros(n)
+
+    for i in range(n):
+
+        s = max(0, i - half)
+        e = min(n, i + half + 1)
+
+        slope[i] = linregress(
+            time[s:e],
+            temp[s:e]
+        ).slope
+
+    return slope
+
 
 def is_numeric(cell):
     '''
@@ -41,105 +387,205 @@ def is_numeric(cell):
         return False
 
 
-from openpyxl import load_workbook
-
-
 def first_line(path, **kwargs):
     """
     Determine the first row of numeric data for CSV or Excel files.
-    Includes automatic delimiter detection and efficient Excel scanning.
+
+    Parameters
+    ----------
+    path : str or Path
+        File to inspect.
+
+    Optional kwargs
+    ---------------
+    sep : str, default None
+        Delimiter for text files. If None, auto-detect.
+
+    target_cols : list[int], default None
+        Columns that must contain numeric values.
+
+    encoding : str, default 'utf-8'
+        Encoding for text files.
+
+    sheet_name : str, int, list, tuple, default 0
+        Excel sheet(s) to inspect.
+
+    Returns
+    -------
+    int
+        First data row for a single sheet/file.
+
+    dict
+        {sheet_name: first_data_row} when multiple sheets are
+        requested.
     """
 
     path = Path(path)
     ext = path.suffix.lower()
 
-    sep = kwargs.get('sep', None)  # None triggers auto-detection
-    target_cols = kwargs.get('target_cols', None)
-    encoding = kwargs.get('encoding', 'utf-8')
+    sep = kwargs.get("sep", None)
+    target_cols = kwargs.get("target_cols", None)
+    encoding = kwargs.get("encoding", "utf-8")
+    sheet_name = kwargs.get("sheet_name", 0)
+
+    def find_first_numeric_row(rows):
+        """
+        Scan iterable of rows and return first row index
+        containing numeric data.
+        """
+
+        for row_idx, cells in enumerate(rows):
+
+            cells = list(cells)
+
+            # Skip empty rows
+            if all(c is None or str(c).strip() == "" for c in cells):
+                continue
+
+            if target_cols is not None:
+
+                if len(cells) <= max(target_cols):
+                    continue
+
+                if all(is_numeric(cells[c]) for c in target_cols):
+                    return row_idx
+
+            else:
+
+                if any(is_numeric(c) for c in cells):
+                    return row_idx
+
+        return 0
 
     # ------------------------------------------------------------
-    # Excel files: use openpyxl to stream rows
+    # Excel files
     # ------------------------------------------------------------
     if ext in [".xls", ".xlsx"]:
-        # For .xls you'd need xlrd or similar; this handles .xlsx well.
-        if ext == ".xlsx":
-            wb = load_workbook(path, read_only=True, data_only=True)
-            ws = wb.active  # or choose a specific sheet
 
-            # openpyxl rows are 1-based; we want 0-based index
-            for row_idx, row in enumerate(ws.iter_rows(values_only=True), start=0):
-                cells = list(row)
+        # --------------------------------------------------------
+        # Multiple sheets requested
+        # --------------------------------------------------------
+        if isinstance(sheet_name, (list, tuple)):
 
-                # Skip completely empty rows
-                if all(c is None or str(c).strip() == "" for c in cells):
-                    continue
+            results = {}
 
-                if target_cols is not None:
-                    # Ensure we have enough columns
-                    if len(cells) > max(target_cols):
-                        if all(is_numeric(cells[c]) for c in target_cols):
-                            return row_idx
-                else:
-                    if any(is_numeric(c) for c in cells):
-                        return row_idx
+            if ext == ".xlsx":
 
-            return 0
+                wb = load_workbook(
+                    path,
+                    read_only=True,
+                    data_only=True
+                )
+
+                for sh in sheet_name:
+
+                    ws = wb[sh]
+
+                    results[sh] = find_first_numeric_row(
+                        ws.iter_rows(values_only=True)
+                    )
+
+            else:  # .xls
+
+                dfs = pd.read_excel(
+                    path,
+                    header=None,
+                    sheet_name=sheet_name
+                )
+
+                for sh, df_sheet in dfs.items():
+
+                    results[sh] = find_first_numeric_row(
+                        (row.tolist()
+                         for _, row in df_sheet.iterrows())
+                    )
+
+            return results
+
+        # --------------------------------------------------------
+        # Single sheet requested
+        # --------------------------------------------------------
         else:
-            # Simple fallback for .xls: load once with pandas
-            df = pd.read_excel(path, header=None)
-            for i, row in df.iterrows():
-                cells = row.tolist()
-                if not all(isinstance(x, (int, float)) for x in cells):
-                    continue
 
-                if target_cols is not None:
-                    if all(is_numeric(cells[c]) for c in target_cols):
-                        return int(i)
+            if ext == ".xlsx":
+
+                wb = load_workbook(
+                    path,
+                    read_only=True,
+                    data_only=True
+                )
+
+                if isinstance(sheet_name, str):
+                    ws = wb[sheet_name]
                 else:
-                    if any(is_numeric(c) for c in cells):
-                        return int(i)
-            return 0
+                    ws = wb.active
+
+                return find_first_numeric_row(
+                    ws.iter_rows(values_only=True)
+                )
+
+            else:  # .xls
+
+                df = pd.read_excel(
+                    path,
+                    header=None,
+                    sheet_name=sheet_name
+                )
+
+                return find_first_numeric_row(
+                    (row.tolist()
+                     for _, row in df.iterrows())
+                )
 
     # ------------------------------------------------------------
-    # Text-based files: CSV, TXT, DAT
+    # Text files
     # ------------------------------------------------------------
 
-    # Try UTF-8, fallback to latin-1
     try:
-        with open(path, 'r', encoding=encoding) as f:
+        with open(path, "r", encoding=encoding) as f:
             f.readline()
     except UnicodeDecodeError:
         encoding = "latin-1"
 
-    # Auto-detect delimiter if not provided
+    # Auto-detect delimiter
     if sep is None:
-        with open(path, 'r', encoding=encoding) as f:
+
+        with open(path, "r", encoding=encoding) as f:
+
             sample = f.read(4096)
+
             try:
                 sep = csv.Sniffer().sniff(sample).delimiter
             except Exception:
-                sep = ','  # fallback
+                sep = ","
 
-    with open(path, 'r', encoding=encoding) as f:
+    with open(path, "r", encoding=encoding) as f:
+
         reader = csv.reader(f, delimiter=sep)
 
         for i, row in enumerate(reader):
+
             cleaned = [cell.strip() for cell in row]
 
             if not cleaned:
                 continue
 
             if target_cols is not None:
-                if len(cleaned) > max(target_cols):
-                    if all(is_numeric(cleaned[c]) for c in target_cols):
-                        return i
+
+                if len(cleaned) <= max(target_cols):
+                    continue
+
+                if all(is_numeric(cleaned[c])
+                       for c in target_cols):
+                    return i
+
             else:
-                if any(is_numeric(cell) for cell in cleaned):
+
+                if any(is_numeric(cell)
+                       for cell in cleaned):
                     return i
 
     return 0
-
-
 
 
 def remove_step_lines(df):
@@ -169,65 +615,117 @@ def remove_step_lines(df):
     return df
 
 
-
-def read_data_file(path, **kwargs):
+def read_data_file(
+    path,
+    target_cols=None,
+    names=None,
+    skiprows=None,
+    header=None,
+    sep=None,
+    encoding="utf-8",
+    sheet_name=0,
+):
     """
-    Read a general data file (.csv, .xls, .xlsx) by detecting file type.
-    For text files, find the first line of numeric data and return a DataFrame.
-    Ensures all values are converted to numeric when possible.
+    Read CSV, TXT, DAT, XLS, or XLSX files and return a single DataFrame.
+
+    Parameters
+    ----------
+    path : str or Path
+        Input file path.
+
+    target_cols : list[int], optional
+        Columns to import.
+
+    names : list[str], optional
+        Column names to assign.
+
+    skiprows : int or dict, optional
+        If None, determined automatically with first_line().
+
+    header : int or None, default None
+        Passed to pandas.
+
+    sep : str, optional
+        Delimiter for text files.
+
+    encoding : str, default 'utf-8'
+        File encoding.
+
+    sheet_name : str, int, list, tuple, default 0
+        Excel sheet(s) to read.
+
+    Returns
+    -------
+    pd.DataFrame
     """
 
     path = Path(path)
     ext = path.suffix.lower()
 
-    sep = kwargs.get('sep', '\t')
-    sheet_name = kwargs.get('sheet_name', None)
-    target_cols = kwargs.get('target_cols', [0, 1])
-    names = kwargs.get('names', ['col1', 'col2'])
-
+    # ------------------------------------------------------------
     # Determine where numeric data begins
-    skiprows = first_line(path, sep=sep, target_cols=target_cols)
+    # ------------------------------------------------------------
+    if skiprows is None:
+        skiprows = first_line(
+            path,
+            sep=sep,
+            target_cols=target_cols,
+            sheet_name=sheet_name,
+            encoding=encoding,
+        )
 
     # ------------------------------------------------------------
     # Excel files
     # ------------------------------------------------------------
     if ext in [".xls", ".xlsx"]:
-        df = pd.read_excel(
-            path,
-            usecols=target_cols,
-            names=names,
-            skiprows=skiprows,
-            header=None,
-            sheet_name = sheet_name
-        )
+
+        # Multiple sheets
+        if isinstance(sheet_name, (list, tuple)):
+
+            sheets = {}
+
+            for sh in sheet_name:
+
+                sheets[sh] = pd.read_excel(
+                    path,
+                    usecols=target_cols,
+                    names=names,
+                    skiprows=skiprows[sh],
+                    header=header,
+                    sheet_name=sh,
+                )
+
+            df = pd.concat(
+                sheets.values(),
+                ignore_index=True
+            )
+
+        # Single sheet
+        else:
+
+            df = pd.read_excel(
+                path,
+                usecols=target_cols,
+                names=names,
+                skiprows=skiprows,
+                header=header,
+                sheet_name=sheet_name,
+            )
 
     # ------------------------------------------------------------
-    # CSV / text files
+    # Text files
     # ------------------------------------------------------------
-    elif ext in [".csv", ".txt", ".dat"]:
+    else:
+
         df = pd.read_csv(
             path,
-            delimiter=sep,
-            skiprows=skiprows,
+            sep=sep,
             usecols=target_cols,
             names=names,
-            engine="python",
-            on_bad_lines="skip"
+            skiprows=skiprows,
+            header=header,
+            encoding=encoding,
         )
-
-    else:
-        raise ValueError(f"Unsupported file type: {ext}")
-
-    # ------------------------------------------------------------
-    # Drop empty rows
-    # ------------------------------------------------------------
-    df = df.dropna(how="all").reset_index(drop=True)
-
-    # ------------------------------------------------------------
-    # Convert all columns to numeric where possible
-    # ------------------------------------------------------------
-    for col in df.columns:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
 
     return df
 
@@ -499,7 +997,7 @@ def downsample_df_per_decade(
     return df.iloc[ordered_idx].copy()
 
 
-def baseline_correct(df, x_col, y_col, x_range=None):
+def baseline_correct_old(df, x_col, y_col, x_range=None):
     """
     Apply linear baseline correction to q vs temp using two anchor temperatures.
 
@@ -545,7 +1043,122 @@ def baseline_correct(df, x_col, y_col, x_range=None):
     return df_out
 
 
-def add_scaled_right_axis(ax, factor, label, precision=1):
+def baseline_correct_old(df, x_col, y_col, x_range=None, n=10):
+    """
+    Apply linear baseline correction using two anchor x values.
+    The baseline is determined from the average of the n data points
+    closest to each anchor value.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+    x_col : str
+        Name of x data column.
+    y_col : str
+        Name of y data column.
+    x_range : list or tuple (x1, x2)
+        Two x values used to determine baseline.
+    n : int, default=10
+        Number of nearest points to average around each anchor.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Copy of dataframe with baseline subtracted from y_col.
+    """
+
+    if x_range is None or len(x_range) != 2:
+        raise ValueError("x_range must be a two-element list or tuple")
+
+    if len(df) < n:
+        return df.copy()
+
+    x1, x2 = x_range
+
+    # Find n points closest to each anchor
+    nearest1 = df.iloc[(df[x_col] - x1).abs().argsort()[:n]]
+    nearest2 = df.iloc[(df[x_col] - x2).abs().argsort()[:n]]
+
+    # Use average x and y values for each anchor
+    x_anchor = np.array([
+        nearest1[x_col].mean(),
+        nearest2[x_col].mean()
+    ])
+
+    y_anchor = np.array([
+        nearest1[y_col].mean(),
+        nearest2[y_col].mean()
+    ])
+
+    # Fit baseline line
+    m, b = np.polyfit(x_anchor, y_anchor, 1)
+
+    # Evaluate baseline
+    baseline = m * df[x_col] + b
+
+    # Correct data
+    df_out = df.copy()
+    df_out[y_col] = df[y_col] - baseline
+
+    return df_out
+
+def baseline_correct(df, x_col, y_col, x_range=None, n=10):
+    """
+    Apply linear baseline correction using two anchor x values.
+    The baseline is determined from the average of the n data points
+    closest to each anchor value.
+    """
+
+    if x_range is None or len(x_range) != 2:
+        raise ValueError("x_range must be a two-element list or tuple")
+
+    if len(df) < n:
+        return df.copy()
+
+    x1, x2 = x_range
+
+    # Find nearest points and keep only valid y values
+    nearest1 = (
+        df.iloc[(df[x_col] - x1).abs().argsort()]
+        .dropna(subset=[y_col])
+        .head(n)
+    )
+
+    nearest2 = (
+        df.iloc[(df[x_col] - x2).abs().argsort()]
+        .dropna(subset=[y_col])
+        .head(n)
+    )
+
+    # If either endpoint does not have n valid points, return unchanged
+    if len(nearest1) < n or len(nearest2) < n:
+        return df.copy()
+
+    # Use average x and y values for each anchor
+    x_anchor = np.array([
+        nearest1[x_col].mean(),
+        nearest2[x_col].mean()
+    ])
+
+    y_anchor = np.array([
+        nearest1[y_col].mean(),
+        nearest2[y_col].mean()
+    ])
+
+    # Fit baseline line
+    m, b = np.polyfit(x_anchor, y_anchor, 1)
+
+    # Evaluate baseline
+    baseline = m * df[x_col] + b
+
+    # Correct data
+    df_out = df.copy()
+    df_out[y_col] = df[y_col] - baseline
+
+    return df_out
+
+
+def add_scaled_right_axis(ax, factor, label, precision=2):
     """
     Create a right-side twin axis whose scale is linearly related
     to the left axis by a user-specified factor.

@@ -780,7 +780,8 @@ def solve_KIC(data_dict, win_size):
         d = d-d0[g]
         C[g] = 1/slope
 
-        a[g] = parms['W']*calc_alpha(C[g], beta, parms['B'], parms['E'])
+        a[g] = parms['W']*calc_alpha(C[g], beta, parms['B'], parms['E'], 
+                                     parms['nu'])
     
     
     soln_dict['summary']['C'] = C
