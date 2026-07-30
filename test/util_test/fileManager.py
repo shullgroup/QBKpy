@@ -34,6 +34,14 @@ def current_file_directory() -> Path:
     return Path(__file__).resolve().parent
 
 
+def file_exists(file_path: str | Path):
+    '''
+    check if file exists
+    '''
+    path = Path(file_path)
+    return path.is_file()
+
+
 def registry_file_path(registry_name):
     '''
     return full file path by registry_name
@@ -54,18 +62,19 @@ def registry_file_path(registry_name):
         return None
 
 
-def load_registry_from_toml(registry_name: str) -> dict | None:
+def load_registry_from_toml(registry_name: str) -> dict:
     '''
     Loads column configuration settings from a TOML file and builds the registry.
     '''
     registry_path = registry_file_path(registry_name)
     if not registry_path:
-        return None
+        raise ValueError(f"Registry '{registry_name}' is missing or empty. Please update the TOML file or check the registry name.")
+    
+    registry = {}
     
     with open(registry_path, "rb") as f:
         config_data = tomllib.load(f)
         
-    registry = {}
     for column_title, metadata in config_data.items():
         raw_name = metadata["raw_name"]
         raw_unit = metadata["raw_unit"]
@@ -152,7 +161,7 @@ def get_text_delimiter(lines: list[str]) -> str:
     try:
         # Explicitly look for standard lab delimiters: tab, comma, semicolon
         sniffer = csv.Sniffer()
-        dialect = sniffer.sniff(sample_block, delimiters=[',', ';', '\t'])
+        dialect = sniffer.sniff(sample_block, delimiters=',;\t')
         return dialect.delimiter
     except csv.Error:
         # If sniffing fails, it's highly likely a non-standard whitespace-delimited file
@@ -209,7 +218,7 @@ def get_file_config(file_path, registry_name, encoding=None, delim=None, errors=
         return [t.strip().strip('\'"').strip() for t in line_str.strip('\n').split(delim)]
 
     # -------------------------------------------------------------------------
-    # STAGE 1: Find the number of columns using the last 2 non-empty rows
+    # 1: Find the number of columns using the last 2 non-empty rows
     # -------------------------------------------------------------------------
     valid_bottom_rows = []
     for i in range(len(lines) - 1, -1, -1):
@@ -244,7 +253,7 @@ def get_file_config(file_path, registry_name, encoding=None, delim=None, errors=
     units_line_idx = None
 
     # -------------------------------------------------------------------------
-    # STAGE 2: Find the header row via registry name verification
+    # 2: Find the header row via registry name verification
     # -------------------------------------------------------------------------
     for i, line in enumerate(lines):
         tokens = split_to_tokens(line)
@@ -264,7 +273,7 @@ def get_file_config(file_path, registry_name, encoding=None, delim=None, errors=
         raise ValueError(f"Could not validate header elements using registry raw_names in '{path.name}'.")
 
     # -------------------------------------------------------------------------
-    # STAGE 3: Find the first numeric data row (bypassing leading indents)
+    # 3: Find the first numeric data row (bypassing leading indents)
     # -------------------------------------------------------------------------
     numeric_pattern = re.compile(r'^\s*[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?\s*$')
     
@@ -278,9 +287,10 @@ def get_file_config(file_path, registry_name, encoding=None, delim=None, errors=
 
     if first_numeric_idx is None:
         raise ValueError(f"Could not identify the start of the numeric data matrix in '{path.name}'.")
-
+    logger.info(f"First numeric data row index: {first_numeric_idx}")
+    logger.info(f"First numeric data row tokens: {split_to_tokens(lines[first_numeric_idx])}")
     # -------------------------------------------------------------------------
-    # STAGE 4: Loop between them to find unit row using strict registry confirmation
+    # 4: Loop between them to find unit row using strict registry confirmation
     # -------------------------------------------------------------------------
     if first_numeric_idx > (header_line_idx + 1):
         for i in range(header_line_idx + 1, first_numeric_idx):
@@ -296,9 +306,10 @@ def get_file_config(file_path, registry_name, encoding=None, delim=None, errors=
             if unit_matches >= 1:
                 units_line_idx = i
                 break
-
+        logger.info(f"Units row index: {units_line_idx}")
+        logger.info(f"Units row tokens: {split_to_tokens(lines[units_line_idx]) if units_line_idx is not None else 'N/A'}")
     # -------------------------------------------------------------------------
-    # STAGE 5: Reconstruct columns safely for Pandas
+    # 5: Reconstruct columns safely for Pandas
     # -------------------------------------------------------------------------
     headers = split_to_tokens(lines[header_line_idx])[-num_columns:]
     units = split_to_tokens(lines[units_line_idx])[-num_columns:] if units_line_idx is not None else [''] * num_columns
@@ -341,6 +352,7 @@ def transform_df_to_si(df: pd.DataFrame, registry_name: str) -> pd.DataFrame:
     """
     si_df = df.copy()
     rename_map = {}
+    df.dropna(axis=1, how='all', inplace=True)  # drop any fully empty columns before processing
 
     # get registry
     registry = load_registry_from_toml(registry_name)
@@ -353,16 +365,18 @@ def transform_df_to_si(df: pd.DataFrame, registry_name: str) -> pd.DataFrame:
             if pd.api.types.is_numeric_dtype(si_df[col]):
                 si_df[col] = mapping.convert_fn(si_df[col])
             
-            # Standardize names as 'common_name_unit' (e.g., 'torque_N·m', 'shear_strain_1')
-            if mapping.si_unit:
-                rename_map[col] = f"{mapping.standard_name}_{mapping.si_unit}"
-            else:
-                rename_map[col] = f"{mapping.standard_name}"
+            # Standardize names without units for internal consistency
+            rename_map[col] = f"{mapping.standard_name}"
         else:
             # Fallback for unexpected columns
             rename_map[col] = col.lower().replace(" ", "_")
-            
-    return si_df.rename(columns=rename_map)
+            # NOTE:mark the column as unrecognized with a '_' before the name for future filtering
+            rename_map[col] = f"_{rename_map[col]}"
+            # mark the column as unrecognized in the log
+            logger.warning(f"Column '{col}' not found in registry '{registry_name}'. Using fallback name '{rename_map[col]}'.")
+    si_df.rename(columns=rename_map, inplace=True)
+    logger.info(f"Renamed columns: {si_df.columns.tolist()}")
+    return si_df
 
 
 # function in one
@@ -375,5 +389,71 @@ def read_csv_to_si(file_path: str | Path, registry_name: str, encoding=None, del
     df = transform_df_to_si(df,registry_name)
 
     return df
+
+
+def read_excel_to_si_dict(
+    file_path: str | Path,
+    registry_name: str,
+    sheets: str | list[str] | dict[str, str] | None = None,
+    transform: bool = True
+) -> dict[str, pd.DataFrame]:
+    """
+    Reads an Excel file into a dictionary of DataFrames keyed by sheet names.
+    Optionally transforms each sheet using `transform_df_to_si`.
+
+    :param file_path: Path to the Excel file.
+    :param sheets: Can be:
+                   - None: reads ALL sheets.
+                   - str: reads a SINGLE sheet.
+                   - list[str]: reads SPECIFIED sheets.
+                   - dict[str, str]: maps {sheet_name_in_excel: registry_name_for_transform}.
+    :param registry_name: The target registry name to use for transformation. 
+                          Used if `sheets` is a string/list/None (overridden if `sheets` is a dict).
+    :param transform: If True, automatically transforms each DataFrame using `transform_df_to_si`.
+    :return: Dict mapping sheet names to DataFrames.
+    """
+
+    if not file_exists(file_path):
+        logger.error(f"Excel file not found: {file_path}")
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    path = Path(file_path)
+    logger.info(f"Reading Excel file: {path.name}")
+    # 1. Parse 'sheets' argument to extract target sheet list and registry mapping
+    sheet_mapping = {}
+    if isinstance(sheets, dict):
+        sheet_param = list(sheets.keys())
+        sheet_mapping = sheets
+    elif isinstance(sheets, str):
+        sheet_param = [sheets]
+    else:
+        sheet_param = sheets  # list[str] or None
+
+    # 2. Read requested sheet(s) into dict
+    try:
+        excel_dict = pd.read_excel(path, sheet_name=sheet_param, engine="openpyxl")
+    except Exception as e:
+        logger.error(f"Failed to read Excel file {path.name}: {e}")
+        raise
+
+    # Standardize single-sheet DataFrame return to a dict
+    if isinstance(excel_dict, pd.DataFrame):
+        single_name = sheet_param[0] if sheet_param else "Sheet1"
+        excel_dict = {single_name: excel_dict}
+
+    processed_data = {}
+
+    # 3. Process each sheet
+    for sheet_name, df in excel_dict.items():
+        logger.debug(f"Loaded sheet '{sheet_name}' with shape {df.shape}")
+
+        if transform:
+
+            df = transform_df_to_si(df, registry_name=registry_name)
+
+        processed_data[sheet_name] = df
+
+    logger.info(f"Successfully processed {len(processed_data)} sheet(s) from {path.name}")
+    return processed_data
 
 # %%

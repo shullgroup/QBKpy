@@ -35,7 +35,7 @@ unit_str      = "$\\text{Hz}$"
 
 [rheology.storage_modulus]
 standard_name = "Storage Modulus"
-short_name    = "G_prime"
+short_name    = "G_p"
 symbol_str    = "$G'$"
 si_unit       = "Pa"
 unit_str      = "$\\text{Pa}$"

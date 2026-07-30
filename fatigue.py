@@ -472,16 +472,13 @@ def fatigue_compliance_CT(df, sample_dict, **kwargs):
     df['Kmax'] = P_to_K(df['Pmax'], B, W, df['alpha'])
     df['DeltaK'] = df['Kmax'] - df['Kmin']
 
-
-    da = np.diff(df['a'])
-    dN = np.diff(df['cycles'])
-    dadN = [x/y for x,y in zip(da,dN)]
+    dadN = np.gradient(df['a'], df['cycles'])
 
     numerator = [i**2 + j**2 for i,j in zip(df['a_err'],df['a_err'].shift(-1))]
-    vardadN = [x/y**2 for x,y in zip(numerator,dN)]
+    vardadN = [x/y**2 for x,y in zip(numerator,np.diff(df['cycles']))]
     dadN_err = np.sqrt(vardadN).tolist()
-
-    df['dadN'] = [np.nan] + dadN
+    
+    df['dadN'] = dadN
     df['dadN_err'] = [np.nan] + dadN_err
 
     df = df.dropna().query('dadN > 0')

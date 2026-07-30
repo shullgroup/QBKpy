@@ -506,17 +506,16 @@ def first_line(path, **kwargs):
         # Single sheet requested
         # --------------------------------------------------------
         else:
+            # Simple fallback for .xls: load once with pandas
+            df = pd.read_excel(path, header=None)
+            for i, row in df.iterrows():
+                cells = row.tolist()
+                if not all(isinstance(x, (int, float)) for x in cells):
+                    continue
 
-            if ext == ".xlsx":
-
-                wb = load_workbook(
-                    path,
-                    read_only=True,
-                    data_only=True
-                )
-
-                if isinstance(sheet_name, str):
-                    ws = wb[sheet_name]
+                if target_cols is not None:
+                    if all(is_numeric(cells[c]) for c in target_cols):
+                        return int(i)
                 else:
                     ws = wb.active
 
@@ -571,14 +570,9 @@ def first_line(path, **kwargs):
                 continue
 
             if target_cols is not None:
-
-                if len(cleaned) <= max(target_cols):
-                    continue
-
-                if all(is_numeric(cleaned[c])
-                       for c in target_cols):
-                    return i
-
+                if len(cleaned) > max(target_cols):
+                    if all(is_numeric(cleaned[c]) for c in target_cols):
+                        return i
             else:
 
                 if any(is_numeric(cell)
