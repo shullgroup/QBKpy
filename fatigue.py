@@ -466,6 +466,7 @@ def fatigue_compliance_CT(df, sample_dict, **kwargs):
         temp_C.append(p[0])
         temp_C_err.append(np.sqrt(np.diag(V))[0])
 
+    # add data to df
     df['C'] = temp_C
     df['C_err'] = temp_C_err
     df['Pmin'] = temp_Pmin
@@ -478,17 +479,18 @@ def fatigue_compliance_CT(df, sample_dict, **kwargs):
     df['C_smooth'] = savgol_filter(df['C'].to_numpy(),
                                    window_length=5, polyorder=1)
 
+    # convert compliance data to relative crack lengths
     df['alpha'], df['alpha_err'] = CT_compliance(sample_dict['E'], df['C_smooth'], 
                                                  df['C_err'], B)
-    
-    #df['alpha_window'] = savgol_filter(df['alpha'].to_numpy(), 
-    #                                   window_length=9, polyorder=2)
+
+    # calculate crack lengths and DeltaKs
     df['a'] = df['alpha']*W
     df['a_err'] = df['alpha_err']*W
     df['Kmin'] = P_to_K(df['Pmin'], B, W, df['alpha'])
     df['Kmax'] = P_to_K(df['Pmax'], B, W, df['alpha'])
     df['DeltaK'] = df['Kmax'] - df['Kmin']
 
+    # crack velocity and uncertainty then add to df
     dadN = np.gradient(df['a'], df['cycles'])
 
     numerator = [i**2 + j**2 for i,j in zip(df['a_err'],df['a_err'].shift(-1))]
@@ -498,6 +500,7 @@ def fatigue_compliance_CT(df, sample_dict, **kwargs):
     df['dadN'] = dadN
     df['dadN_err'] = [np.nan] + dadN_err
 
+    # filter out negative speeds
     df = df.dropna().query('dadN > 0')
 
     # add uncertainties?
@@ -560,16 +563,20 @@ def fatigue_plot_CT(df, **kwargs):
         thr_cycle = 0
     Kthr = df.query('cycles > @thr_cycle')['DeltaK'].iloc[0]
 
+    # filter over range of reliable K
     fit_df = df.query('DeltaK > @Kthr')
     fit_df = fit_df.query('DeltaK < @Kc')
 
+    # perform the fit
     popt, pcov = curve_fit(power_law, fit_df['DeltaK'], fit_df['dadN'],
                             p0=[1e-5, 20],
                             bounds=([0,1],[10,40]))
-    
+
+    # assign the fitted parameters and uncertainties
     A, m = popt
     A_err, m_err = np.sqrt(np.diag(pcov))
 
+    # create fitting curve
     fitK = np.arange(Kthr, Kc, 0.01)
     fitdadN = power_law(fitK, A, m)
 
@@ -595,7 +602,6 @@ def fatigue_plot_CT(df, **kwargs):
         cb = plt.colorbar(sm, ax=ax[0], cmap=cmap, norm=norm, label='Cycle')
     
         # crack length vs. cycles plot
-
         ax[1].plot(df['cycles'], df['a'], 'o')
         ax[1].set_xlabel('Cycles')
         ax[1].set_ylabel('Crack Length, a (mm)')
@@ -613,6 +619,7 @@ def fatigue_plot_CT(df, **kwargs):
     
     else:
 
+        # just the crack velocity plot
         set_default_cycler()
         fig, ax = plt.subplots(1,1, figsize=(4,3), constrained_layout=True)
 
@@ -626,10 +633,12 @@ def fatigue_plot_CT(df, **kwargs):
                 label=f'm = {m:0.2f} $\\pm$ {m_err:0.2f}')
         ax.legend()
 
+    # add a title
     if title:
         plt.suptitle(title)
     plt.show(block=False)
 
+    # save the plot
     if savepath:
         plt.savefig(savepath)
 
