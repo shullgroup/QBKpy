@@ -3,145 +3,202 @@
 import numpy as np
 import pandas as pd
 from scipy.signal import savgol_filter
-from .utils import (read_data_file, baseline_correct)
-from .models import fit_gaussian
+from utils import (read_data_file, baseline_correct)
+from models import fit_gaussian
 
 labels = {'temp': r'T ($^\circ$C)',
+          'temp_in': r'T ($^\circ$C)',
           'time': r't (min.)',
-          'q': r'q (Watts$\cdot$g$^{-1}$)',
+          'time_in': r't (min.)',
+          'q': r'q (Watts$\cdot$g$^{-1}$)'+'\n'+r'exo $\longrightarrow$',
+          'q_in': r'q (Watts$\cdot$g$^{-1}$)'+'\n'+r'exo $\longrightarrow$',
           'q_r': r'$q/r$ (J$\cdot$g$^{-1}\cdot$K$^{-1}$)',
-          'dqdT': '$dq/dT$ (Watts$\cdot$K$^{-1}$g$^{-1}$)'}
+          'dqdT': ('$dq/dT$ (Watts$\cdot$K$^{-1}$g$^{-1}$)'+
+                   '\n'+r'exo $\longrightarrow$')}
 
-def read_dsc(path, mode='conv', apply_savgol=True, savgol_window=151,
-             savgol_polyorder=4, n_crit=50, **kwargs):
+
+def read_dsc(path, mode='conv', **kwargs):
     """
-    Read txt file from DSC experiment and convert to a DataFrame.
-    Supports both conventional ('conv') and modulated ('mdsc') modes.
+    Read Differential Scanning Calorimetry (DSC) data from a text,
+    CSV, or spreadsheet file and return the results as a pandas
+    DataFrame.
 
+    The function supports both conventional DSC ("conv") and
+    modulated DSC ("mdsc") data formats. Input files are read using
+    `utils.read_data_file()`, selected columns are renamed to
+    standardized variable names, and optional preprocessing steps are
+    applied.
+ 
+    For conventional DSC data, the raw signals are smoothed using
+    `utils.spline_smooth()`, after which first derivatives with
+    respect to time and temperature are calculated.
+ 
     Parameters
     ----------
-    path : Path
-        Path object to the .txt file containing the DSC data.
-    mode : str, default 'conv'
-        'conv' for conventional DSC, 'mdsc' for modulated DSC.
-    apply_savgol : bool, default True
-        Apply Savitzky–Golay smoothing to temp and power.
-    savgol_window : int, default 151
-        Window length for Savitzky–Golay filter (must be odd).
-    savgol_polyorder : int, default 4
-        Polynomial order for Savitzky–Golay filter.
-    n_crit : int, default 50
-        Number of consecutive slope points used for segmentation.
-    columns : list of integers
-        Columns to read - defaults determined by DSC type
-    **kwargs : dict
-        Optional keyword arguments such as:
-        - sep : delimiter for input file
-        - time_to_sec : convert minutes → seconds
-
-
+    path : str or pathlib.Path
+        Path to the DSC data file.
+ 
+    mode : {'conv', 'mdsc'}, optional
+        Type of DSC data to process.
+ 
+        - 'conv' : Conventional DSC data containing time,
+          temperature, and heat-flow measurements.
+        - 'mdsc' : Modulated DSC data containing reversing and
+          non-reversing heat-flow components.
+ 
+        Default is 'conv'.
+ 
+    Other Parameters
+    ----------------
+    smooth_factor : float, optional
+        Smoothing factor passed to `utils.spline_smooth()` when
+        processing conventional DSC data. Larger values produce
+        smoother signals. Default is 1.
+ 
+    sep : str, optional
+        Column delimiter used when reading text files.
+        Default is '\\t'.
+ 
+    sheet_name : int, str, list, or None, optional
+        Worksheet(s) to read when the input file is an Excel workbook.
+        Passed directly to `utils.read_data_file()`.
+        Default is [0].
+ 
+    columns : sequence of int, optional
+        Column indices to extract from the source file. If omitted,
+        mode-specific defaults are used.
+ 
+    time_to_sec : bool, optional
+        If True, converts the input time values from minutes to
+        seconds. Default is False.
+ 
     Returns
     -------
-    df : pd.DataFrame
-        Cleaned and optionally smoothed DSC data.
+    pandas.DataFrame
+        Processed DSC data.
+ 
+        For conventional DSC mode, the returned DataFrame contains:
+ 
+        - time_in : raw time values
+        - temp_in : raw temperature values
+        - q_in : raw heat-flow values
+        - time : smoothed time values
+        - temp : smoothed temperature values
+        - q : smoothed heat-flow values
+        - dTdt : heating/cooling rate (dT/dt)
+        - dqdt : heat-flow rate (dq/dt)
+        - dqdT : heat-flow derivative with respect to temperature
+          (dq/dT)
+ 
+        For modulated DSC mode, the returned DataFrame contains the
+        selected and renamed input columns without derivative
+        calculations.
+ 
+    Notes
+    -----
+    Rows containing non-numeric values in required conventional DSC
+    columns are automatically removed before smoothing and derivative
+    calculations.
+ 
+    Derivatives are computed using `numpy.gradient()`, which provides
+    numerically stable central-difference estimates for uniformly
+    sampled data.
     """
 
+    smooth_factor = kwargs.get('smooth_factor', 1)
     sep = kwargs.get('sep', '\t')
+    sheet_name = kwargs.get('sheet_name', [0])
 
     # Determine columns based on mode
     if mode == 'mdsc':
-        target_cols, names = [0, 1, 2, 3, 7], ['time', 'temp', 'q_rev', 'q_non', 'dq_revdT']
+        target_cols, names = [0, 1, 2, 3, 7], ['time_in', 'temp', 'q_rev', 'q_non', 'dq_revdT']
     else:
-        target_cols, names = [0, 1, 2], ['time', 'temp_in', 'q_in']
+        target_cols, names = [0, 1, 2], ['time_in', 'temp_in', 'q_in']
         
     
     target_cols = kwargs.get('columns', target_cols)
 
-    df = read_data_file(path, sep=sep,
+    df = utils.read_data_file(path, sep=sep,
                         target_cols=target_cols,
-                        names=names)
+                        names=names,
+                        sheet_name = sheet_name)
 
     # Convert time if requested
     if kwargs.get('time_to_sec', False):
-        df['time'] = df['time'] * 60
+        df['time_in'] = df['time_in'] * 60
 
     # Conventional DSC derivative
     if mode == 'conv':
-        df = df.dropna(subset=['temp_in', 'q_in'])
+        cols = ['time_in', 'temp_in', 'q_in']
+        
+        df[cols] = df[cols].apply(pd.to_numeric, errors='coerce')
+        df = df.dropna(subset=cols)
 
-    # Apply Savitzky–Golay smoothing and insert columns in correct positions
-    if mode == 'conv' and apply_savgol:
-        # smoothed q and temp
-        q_smoothed = savgol_filter(df['q_in'], savgol_window, savgol_polyorder)
-        temp_smoothed = savgol_filter(df['temp_in'], savgol_window, savgol_polyorder)
-        
-        # Insert smoothed q right after 'q_in'
-        q_pos = df.columns.get_loc('q_in') + 1
-        df.insert(q_pos, 'q', q_smoothed)
-        
-        # Insert smoothed temp right after 'temp_in'
-        temp_pos = df.columns.get_loc('temp_in') + 1
-        df.insert(temp_pos, 'temp', temp_smoothed)
-        
-        # Compute dQ/dT safely
-        dt = np.gradient(temp_smoothed)
-        dq = np.gradient(q_smoothed)
-        
-        dqdT = np.full_like(q_smoothed, np.nan, dtype=float)
-        
-        valid = np.abs(dt) > 1e-12  # adjust tolerance if needed
-        dqdT[valid] = dq[valid] / dt[valid]
-        
-        # Insert dqdT right after the smoothed q column
-        dqdT_pos = df.columns.get_loc('q') + 1
-        df.insert(dqdT_pos, 'dqdT', dqdT)
 
+    if mode == 'conv':
+        for var in ['time', 'temp', 'q']:
+            var_smooth = utils.savgol_interpolate(df[f'{var}_in'])
+            df.insert(df.columns.get_loc(f'{var}_in')+1, var, var_smooth)
+       
     return df
 
 
-def read_segmented_dsc(
-    path,
-    mode='conv',
+def read_segmented_dsc(path,
     apply_savgol=True,
     savgol_window=151,
     savgol_polyorder=4,
-    frac_thresh=0.05,
-    n_crit=50,
-    **kwargs
-):
-    """
-    Read a multi‑sheet XLS file where each sheet contains DSC data.
-    For each sheet:
-        1. Run read_dsc‑like preprocessing
-        2. Run find_monotonic_segments
-    Returns a dict keyed by sheet name:
-        {
-            sheet_name: {
-                'df': cleaned dataframe,
-                'segments': segment dictionary
-            }
-        }
-    """
+    end_temp_width = 10
+    ):
+
+    df_dict = pd.read_excel(path, sheet_name = None, header=None, 
+                            names = ['time', 'temp_in', 'q_in'],
+                            skiprows=3)
+    segments = {}
+    k=0
+    for i in np.arange(len(df_dict.keys())):
+        segments[k] = {}
+        segments[k]['name'] = list(df_dict.keys())[i]
+        df = df_dict[segments[k]['name']]
+        df = df.dropna(subset=['time', 'temp_in', 'q_in'])
+        if len(df) == 0:
+            continue
+        df['temp'] = df['temp_in']
+        df['q'] = df['q_in']
+        segments[k]['rate'] = ((df.iloc[-1]['temp']-df.iloc[0]['temp'])/
+                               (df.iloc[-1]['time']-df.iloc[0]['time']))
+        if abs(segments[k]['rate'])>0.9:
+            df = remove_extreme_temps(df, end_temp_width)
+        if apply_savgol:
+            df['q'] = utils.savgol_smooth(df['q'], 
+                                    window_length=savgol_window,
+                                    polyorder=savgol_polyorder)
+            df['temp'] = utils.savgol_smooth(df['temp'], 
+                                    window_length=savgol_window,
+                                    polyorder=savgol_polyorder)
+        
+        dq = np.gradient(df['q'])
+        dT = np.gradient(df['temp'])
+        
+        df['dqdT'] = np.divide(dq, dT,
+            out=np.full_like(dq, np.nan, dtype=float),
+            where=dT != 0)
+        
+        segments[k]['df'] = df
+        k += 1
+    return segments
 
 
-    dfs = read_data_file(
-        path,
-        sheet_name=None,
-        usecols=[0, 1, 2],
-        names=['time', 'temp_in', 'q_in']
-    )
-    
-    df = pd.concat(dfs.values(), ignore_index=True)
-
-
-    return df
-
-
-
-def plot_dsc(df_in, ax, xdata, ydata, **kwargs):
+def plot_dsc(df_in, ax, xdata, ydata, 
+             baseline = None,
+             T_range = None,
+             showTg = False,
+             fmt = '-',
+             **plot_options):
     '''
     Generate typical plots for DSC experiments. Emphasis primarily placed
     on finding Tg as opposed to other transitions for now.
+    Data assumed to be 'Exo Up' - reverse the sign before plotting if this is
+    not the case
 
     Parameters
     ----------
@@ -149,70 +206,45 @@ def plot_dsc(df_in, ax, xdata, ydata, **kwargs):
         DataFrame containing experimental data read in from the readDSC function
     ax : mpl.axes.Axes, default None
             Axes for the heat flow if one already exists.
-    mode : str, default 'conv'
-        DSC mode used for experiment. Options are 'conv' for conventional DSC
-        or 'mdsc' for temperature modulated DSC.
-
-    baseline : list of two numbers
-        x vlues to use for baseline correction
-    label : string, default ''
-        legend label, default '' gives no label
-    deriv_plot : bool, deault False
-        option to put the dQ/dT on a twinned right axis
+    baseline : list of two floats, default None
+        x vlues to use for baseline correction, ignored if equal to []
+    T_range : list of two floats, default None
+        x range to plot, not used by default
     showTg : bool, default True
         Option to show Tg fit from fit_gaussian.
-    orientation : str, default 'exo_up'
-        Orientation for heat flow annotation ('exo_up' or 'endo_up').
     fmt : str, default '-'
         Format string
-    linewidth : float, default None
-        Linewidth for plot
+    plot_options : dictionary of plot options passed directly to the 
+        matplotlib plot function
 
+    
     Returns
     -------
     Tg : float
         Glass transition temperature (Tg) in deg. Celsius.
 
     '''
-    mode = kwargs.get('mode', 'conv')  # 'conv' is assumed now'
-    fmt = kwargs.get('fmt', '-')
-    linewidth = kwargs.get('linewidth', 1)
-    label = kwargs.get('label', '')
 
-    orientation = kwargs.get('orientation', 'exo_up')
     df = df_in.copy()
 
     # apply baseline correction if needed
-    if 'baseline' in kwargs.keys():
-        df = baseline_correct(df, xdata, ydata, kwargs.get('baseline'))
+    if baseline != None and len(baseline) == 2:
+        df = utils.baseline_correct(df, xdata, ydata, baseline)
     
     # clean up dataframe
     df = df.replace([np.inf, -np.inf], np.nan).dropna(subset=['temp', 'q'])
     
     # optional temperature filtering
-    T_range = kwargs.get('T_range')
-    if T_range is not None:
+    if T_range != None and len(T_range) == 2:
         df = df.loc[df['temp'].between(*T_range)]
-    
     
     # ceate axis lables
     ax.set_xlabel(labels[xdata])
     ax.set_ylabel(labels[ydata])
     
     # ax.set_prop_cycle(default_cycler)
-    ax.plot(df[xdata], df[ydata], fmt, linewidth = linewidth,
-            label = label)
-
+    ax.plot(df[xdata], df[ydata], fmt, **plot_options)
            
-    # add annotation for the heat flow orientation
-    if ydata == 'q':
-        if orientation == 'exo_up':
-            ax.annotate('Exo Up', (5,5), xycoords='axes points')
-        elif orientation == 'endo_up':
-            ax.annotate('Endo Up', (5,5), xycoords='axes points')
-    
-    return df
-
 
 def fit_gaussian_dsc(df: pd.DataFrame, ax, **kwargs):
     """
@@ -285,86 +317,217 @@ def fit_gaussian_dsc(df: pd.DataFrame, ax, **kwargs):
     return Tg, Tg_err, dT, dT_err
 
 
-def find_monotonic_segments(df, frac_thresh=0.05, n_crit=50, ax=None):
+def find_monotonic_segments(df_in,
+                            frac_thresh=0.05,
+                            n_crit=50,
+                            ax=None,
+                            **kwargs):
     """
-    Identify increasing/decreasing segments lasting at least n_crit rows.
-    Adds a 'segment' column to df indicating segment membership.
-    Constant portions receive segment = -1.
+    Identify monotonic temperature-program segments from piecewise
+    linear DSC data.
 
-    Returns a dictionary keyed by segment number:
-        - type ('increasing' or 'decreasing')
-        - s (start index)
-        - e (end index)
-        - ramp_rate
-        - idxvals (array of indices in the segment)
+    Unlike derivative-based approaches, this routine estimates ramp
+    rates from large blocks of data using endpoint slopes. This makes
+    the segmentation highly resistant to quantization artifacts,
+    limited numerical precision, and other small fluctuations that
+    often produce spurious dT/dt values.
+
+    Parameters
+    ----------
+    df_in : pandas.DataFrame
+        Input DataFrame containing at least:
+
+            - time
+            - temp
+
+    frac_thresh : float, optional
+        Fraction of the largest absolute ramp rate used to distinguish
+        increasing/decreasing segments from approximately constant
+        regions.
+
+        Default is 0.05.
+
+    n_crit : int, optional
+        Minimum number of rows required for a segment to be retained.
+
+        Default is 50.
+
+    ax : matplotlib.axes.Axes, optional
+        Axes on which identified segments are plotted.
+
+    Other Parameters
+    ----------------
+    block_size : int, optional
+        Number of points used to estimate each local ramp rate.
+
+        Larger values produce more robust segmentation.
+
+        Typical values:
+
+            100   -> sensitive
+            500   -> recommended
+            1000  -> very robust
+
+        Default is 500.
+
+    fmt : str, optional
+        Plot format string.
+
+        Default is '-'.
+
+    Returns
+    -------
+    dict
+        Dictionary of segments keyed by segment number.
+
+        Each segment contains:
+
+            - type
+            - s
+            - e
+            - ramp_rate
+            - idxvals
+            - df
+
+    Notes
+    -----
+    Ramp rates are estimated as
+
+        (T_end - T_start)/(t_end - t_start)
+
+    on coarse blocks rather than from numerical derivatives. This is
+    generally much more reliable for DSC temperature programs that
+    consist of a small number of long linear ramps.
     """
 
-    slope = np.gradient(df['temp'].values, df['time'].values)
+    df = df_in.copy()
 
-    # dynamic threshold
-    max_slope = np.max(np.abs(slope))
+    time = df['time'].to_numpy()
+    temp = df['temp'].to_numpy()
+
+    fmt = kwargs.get('fmt', '-')
+    block_size = kwargs.get('block_size', 500)
+
+    n = len(df)
+
+    # segment assignment for every row
+    labels = np.full(n, 'constant', dtype=object)
+
+    # ---- determine block slopes ----
+
+    block_slopes = []
+    block_ranges = []
+
+    for s in range(0, n, block_size):
+
+        e = min(s + block_size, n)
+
+        if e - s < 2:
+            continue
+
+        slope = (
+            temp[e - 1] - temp[s]
+        ) / (
+            time[e - 1] - time[s]
+        )
+
+        block_slopes.append(slope)
+        block_ranges.append((s, e))
+
+    if len(block_slopes) == 0:
+        return {}
+
+    max_slope = np.max(np.abs(block_slopes))
     threshold = frac_thresh * max_slope
 
-    # classify slope
-    def classify(s):
-        if abs(s) <= threshold:
+    def classify(slope):
+
+        if abs(slope) <= threshold:
             return 'constant'
-        return 'increasing' if s > 0 else 'decreasing'
 
-    labels = np.array([classify(s) for s in slope])
+        return 'increasing' if slope > 0 else 'decreasing'
 
-    # enforce minimum run length
-    final_labels = labels.copy()
-    start = 0
-    for i in range(1, len(labels) + 1):
-        if i == len(labels) or labels[i] != labels[start]:
-            run_label = labels[start]
-            run_len = i - start
-            if run_label in ('increasing', 'decreasing') and run_len < n_crit:
-                final_labels[start:i] = 'constant'
-            start = i
+    # assign label to each block
+    for slope, (s, e) in zip(block_slopes, block_ranges):
 
-    # --- Extract monotonic segments ---
-    segments = {}
-    seg_num = 0
-    start = 0
+        labels[s:e] = classify(slope)
 
-    # initialize segment column
+    # ---- merge contiguous regions ----
+
     df['segment'] = -1
 
-    for i in range(1, len(final_labels) + 1):
-        if i == len(final_labels) or final_labels[i] != final_labels[start]:
-            label = final_labels[start]
+    segments = {}
+    seg_num = 0
 
-            if label in ('increasing', 'decreasing'):
-                s = int(start)
-                e = i - 1
+    start = 0
 
-                segments[seg_num] = {
-                    'type': label,
-                    's': s,
-                    'e': e,
-                    'ramp_rate': (
-                        (df.temp.iloc[e] - df.temp.iloc[s]) /
-                        (df.time.iloc[e] - df.time.iloc[s])
-                    ),
-                    'idxvals': np.r_[s:e]
-                }
-
-                # assign segment number to df
-                df.loc[s:e, 'segment'] = seg_num
-                segments[seg_num]['df'] = df[df['segment'] == seg_num].copy()
-                seg_num += 1
-
+    for i in range(1, n + 1):
+    
+        end_of_run = (
+            i == n or
+            labels[i] != labels[start]
+        )
+    
+        if end_of_run:
+    
+            label = labels[start]
+    
+            if label != 'constant':
+    
+                seg_len = i - start
+    
+                if seg_len >= n_crit:
+    
+                    s = start
+                    e = i - 1
+    
+                    ramp_rate = (
+                        temp[e] - temp[s]
+                    ) / (
+                        time[e] - time[s]
+                    )
+    
+                    df.loc[s:e, 'segment'] = seg_num
+    
+                    segments[seg_num] = {
+                        'type': label,
+                        's': s,
+                        'e': e,
+                        'ramp_rate': ramp_rate,
+                        'idxvals': np.arange(s, e + 1),
+                        'df': df.iloc[s:e + 1].copy()
+                    }
+    
+                    seg_num += 1
+    
             start = i
 
-    # --- Optional plotting ---
-    if ax is not None and len(segments) > 0:
-        plot_dsc(df, ax, 'time', 'temp', fmt='--', linewidth=0.5)
-        for seg in segments.keys():
+    # ---- optional plotting ----
+
+    if ax is not None and len(segments):
+
+        plot_dsc(
+            df,
+            ax,
+            'time',
+            'temp',
+            fmt='--',
+            linewidth=0.5
+        )
+
+        for seg in segments:
+
             s = segments[seg]['s']
             e = segments[seg]['e']
-            plot_dsc(df.iloc[s:e+1], ax, 'time', 'temp', fmt=f'C{seg}')
+
+            plot_dsc(
+                df.iloc[s:e + 1],
+                ax,
+                'time',
+                'temp',
+                fmt=fmt + f'C{seg}'
+            )
+
         ax.legend()
 
     return segments
@@ -372,11 +535,17 @@ def find_monotonic_segments(df, frac_thresh=0.05, n_crit=50, ax=None):
 
 def remove_extreme_temps(df, n):
     """
-    Remove rows where 'temp' is within n degrees of the min or max temp.
+    Set 'temp' and 'q' to NaN where 'temp' is within n degrees
+    of the minimum or maximum temperature.
     """
+    df = df.copy()
+
     tmin = df['temp'].min()
     tmax = df['temp'].max()
 
     mask = (df['temp'] < tmin + n) | (df['temp'] > tmax - n)
-    return df.loc[~mask].copy()
+
+    df.loc[mask, ['temp', 'q']] = np.nan
+
+    return df
 

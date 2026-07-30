@@ -52,57 +52,103 @@ def fit_gaussian(
     absolute_sigma: bool = False,
     peak_direction: str = 'max', # 'max' or 'min' for auto-guessing and y-inversion
     plot_label_formatter=None, # Function to format the plot label
-    **kwargs
-):
+    curve_fit_options = None):
+    
     """
-    Fits data to a single Gaussian peak using the external Gaussian function.
+    Fit a single Gaussian peak to data.
+
+    The function optionally performs baseline correction, limits the fit
+    to a specified x-range, automatically estimates initial fitting
+    parameters, and fits the data using ``scipy.optimize.curve_fit``.
 
     Parameters
     ----------
-    df : pd.DataFrame
-        DataFrame containing the data.
+    df : pandas.DataFrame
+        DataFrame containing the data to fit.
+
     x_col : str
-        Column name for the x-axis data (independent variable).
+        Name of the column containing the independent variable.
+
     y_col : str
-        Column name for the y-axis data (dependent variable).
-    ax : mpl.axes.Axes, optional
-        Axes object to plot Gaussian fit on. If None, no plot is generated.
-    baseline : list or tuple two floats
-        X axis values used to establish baseline
-    x_range : list or tuple of two floats
-        X axis range for which fit will be attempted defaults to baseline
-    guess : list, optional
-        Initial guess (p0) for fitting parameters [center, amplitude, width, baseline].
-        If None, an automatic guess is attempted based on peak_direction.
+        Name of the column containing the dependent variable.
+
+    ax : matplotlib.axes.Axes, optional
+        Axes object on which to plot the fitted Gaussian. If None,
+        no plot is generated.
+
+    baseline : list or tuple of float, optional
+        Two x-values defining the region used for baseline correction.
+        If None, no baseline correction is performed.
+
+    guess : list of float, optional
+        Initial parameter estimates in the form::
+
+            [center, amplitude, width]
+
+        If None, parameters are estimated automatically.
+
     bounds : tuple, optional
-        Bounds for the fitting parameters: ([lower_ctr, lower_amp, lower_wid],
-        [upper_ctr, upper_amp, upper_wid]).
-        If None, very broad default bounds are used.
-    sigma : array_like or None, optional
-        Determines the uncertainty in ydata.
-    absolute_sigma : bool, optional
-        If True, sigma is used in an absolute sense and the estimated parameter
-        covariance pcov reflects these absolute uncertainties.
-    peak_direction : {'max', 'min'}, default 'max'
-        Direction of the peak for automatic guessing and potential y-axis inversion.
-        'max' for a peak pointing up, 'min' for a peak pointing down.
+        Lower and upper bounds for the fit parameters in the form::
+
+            ([lower_ctr, lower_amp, lower_wid],
+             [upper_ctr, upper_amp, upper_wid])
+
+        If None, broad default bounds are used.
+
+    x_range : tuple of float, optional
+        Restrict fitting to data between ``(xmin, xmax)``. If None,
+        the entire dataset is used.
+
+    sigma : array_like, optional
+        Uncertainties associated with ``y_col`` values. Passed directly
+        to ``scipy.optimize.curve_fit``.
+
+    absolute_sigma : bool, default=False
+        If True, ``sigma`` is interpreted as absolute uncertainties and
+        parameter uncertainties are calculated accordingly.
+
+    peak_direction : {'max', 'min'}, default='max'
+        Direction of the peak being fitted.
+
+        * ``'max'``: positive peak
+        * ``'min'``: negative peak
+
+        For negative peaks, the data are internally inverted during
+        fitting and restored for plotting and returned results.
+
     plot_label_formatter : callable, optional
-        A function that takes (ctr, wid) and returns a string for the plot label.
-        If None, a default generic label will be used.
-    **kwargs:
-        Any additional keyword arguments are passed directly to `scipy.optimize.curve_fit`.
-        (e.g., `maxfev=5000`)
+        Function that accepts ``(ctr, wid)`` and returns a string to use
+        as the legend label for the fitted curve.
+
+    **cuve_fit_options
+        Additional keyword arguments passed directly to
+        ``scipy.optimize.curve_fit``. For example::
+
+            maxfev=10000
 
     Returns
     -------
     ctr : float
-        Center of Gaussian fit. Returns np.nan if fit fails.
-    ctr_err : float
-        Uncertainty in center of Gaussian fit. Returns np.nan if fit fails.
+        Fitted peak center.
+
     wid : float
-        Width of Gaussian fit. Returns np.nan if fit fails.
-    wid_err : float
-        Uncertainty in width of Gaussian fit. Returns np.nan if fit fails.
+        Fitted Gaussian width parameter.
+
+    amp : float
+        Fitted peak amplitude. For ``peak_direction='min'``, the returned
+        amplitude is negative.
+
+    errors : dict
+        Dictionary containing one-standard-deviation uncertainties:
+
+        * ``errors['ctr']`` : peak center uncertainty
+        * ``errors['wid']`` : width uncertainty
+        * ``errors['amp']`` : amplitude uncertainty
+
+    Notes
+    -----
+    If the fit fails, NaN values are returned for all parameters and
+    uncertainties.
     """
 
     # 1. Data Cleaning
@@ -112,7 +158,7 @@ def fit_gaussian(
         print("Warning: DataFrame is empty after cleaning. Cannot fit.")
         return np.nan, np.nan, np.nan, np.nan
     
-    df_clean = baseline_correct(df_clean, x_col, y_col, x_range=baseline)
+    df_clean = utils.baseline_correct(df_clean, x_col, y_col, x_range=baseline)
     if x_range == 'bounds':
         x_range = bounds
     
@@ -147,9 +193,7 @@ def fit_gaussian(
     # Default Bounds (very broad to be general)
     if bounds is None:
         x_min, x_max = x_data.min(), x_data.max()
-        y_min, y_max = y_data.min(), y_data.max() # Use original y_data for bounds reasoning
         x_range = x_max - x_min
-        y_range = y_max - y_min
 
         # Ensure width lower bound is positive
         min_wid = 0.001 
@@ -163,13 +207,17 @@ def fit_gaussian(
 
     try:
         # Perform the Curve Fit
+        if curve_fit_options is None:
+            curve_fit_options = {}
         popt, pcov = curve_fit(gaussian, x_data, fit_y_data, p0=guess,
                                bounds=bounds, sigma=sigma,
-                               absolute_sigma=absolute_sigma, **kwargs)
+                               absolute_sigma=absolute_sigma, 
+                               **curve_fit_options
+                               )
         perr = np.sqrt(np.diag(pcov))
 
         # Unpack parameters and their uncertainties
-        ctr, amp_fit, wid = popt
+        ctr, amp, wid = popt
         ctr_err, amp_err, wid_err = perr
 
         # Generate Fit Curve for Plotting
@@ -177,9 +225,9 @@ def fit_gaussian(
         
         # For plotting, if peak_direction was 'min', we need to invert the fitted amplitude
         # back to represent the true negative peak on the original y-axis scale.
-        plot_amp = amp_fit
+        plot_amp = amp
         if peak_direction == 'min':
-            plot_amp = -amp_fit
+            plot_amp = -amp
 
         fit_y = gaussian(fit_x, ctr, plot_amp, wid)
 
@@ -191,14 +239,18 @@ def fit_gaussian(
                 label = f'Center = {ctr:0.1f} \n Width = {wid:0.1f}'
             ax.plot(fit_x, fit_y, ':', color='k', label=label)
             ax.legend()
+            
+        errors = {'ctr':ctr_err,
+                  'wid':wid_err,
+                  'amp':amp_err}
         
-        return ctr, ctr_err, wid, wid_err
+        return ctr, amp, wid, errors
 
     except Exception as e:
         print(f"Gaussian fitting failed for {y_col} (x={x_col}): {e}")
-        return np.nan, np.nan, np.nan, np.nan
-
-
+        return np.nan, np.nan, np.nan, {'ctr':np.nan,
+                                        'wid':np.nan,
+                                        'amp':np.nan}
 # arrhenius
 def arrhenius(T, A, Ea):
 
