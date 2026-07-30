@@ -158,7 +158,7 @@ def fit_gaussian(
         print("Warning: DataFrame is empty after cleaning. Cannot fit.")
         return np.nan, np.nan, np.nan, np.nan
     
-    df_clean = utils.baseline_correct(df_clean, x_col, y_col, x_range=baseline)
+    df_clean = baseline_correct(df_clean, x_col, y_col, x_range=baseline)
     if x_range == 'bounds':
         x_range = bounds
     
