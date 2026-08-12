@@ -16,6 +16,7 @@ from sympy import symbols, diff, log, sqrt, lambdify, Rational
 from copy import deepcopy
 from .utils import set_default_cycler
 from .fracture import KIcfx, deriv_KIcfx, P_to_K
+from .models import power_law
 
 # a is the crack length
 # W is the sample width in the direction of crack propgation
@@ -392,21 +393,37 @@ def CT_compliance(E, C, C_err, B):
 
 def fatigue_compliance_CT(df, sample_dict, **kwargs):
     '''
-    Function description.
+    Calculate compliance from load-displacement curves of fatigue experiments.
+    Also convert to crack length and velocity and stress intensity.
     
     Parameters
     ----------
-    variable : type
-        description
+    df : pd.DataFrame
+        DataFrame from reading in experimental data using read_fatigue_CT
+
+    sample_dict : dict
+        Dictionary of samples including specimen dimensions and modulus.
+        Formatted as dict = {'sample':{'specimen':{'B':[], 'W':[], 'E':value}}}
+
+    step_length : int, default 10000
+        Number of cycles in a fatigue experiment step (if multiple steps used)
+
+    min_ratio : float, default 0.05
+        Ratio of load-displacement curve to filter out at start of cycle due
+        to non-linearity
+
+    max_offset : int, default 4
+        Number of data points to filter out at peak of load-displacement cycle
+        due to non-linearity
+
+    front_filter : int, default 50
+        Number of cycles to discard from the beginning of each step due to 
+        instability as specimen settles
     
     Returns
     -------
-    variable : type
-        description
-    
-    Notes
-    -----
-    - additional notes
+    df : pd.DataFrame
+        Updated DataFrame with additional calculated values.
     
     '''
     
@@ -449,6 +466,7 @@ def fatigue_compliance_CT(df, sample_dict, **kwargs):
         temp_C.append(p[0])
         temp_C_err.append(np.sqrt(np.diag(V))[0])
 
+    # add data to df
     df['C'] = temp_C
     df['C_err'] = temp_C_err
     df['Pmin'] = temp_Pmin
@@ -461,17 +479,18 @@ def fatigue_compliance_CT(df, sample_dict, **kwargs):
     df['C_smooth'] = savgol_filter(df['C'].to_numpy(),
                                    window_length=5, polyorder=1)
 
+    # convert compliance data to relative crack lengths
     df['alpha'], df['alpha_err'] = CT_compliance(sample_dict['E'], df['C_smooth'], 
                                                  df['C_err'], B)
-    
-    #df['alpha_window'] = savgol_filter(df['alpha'].to_numpy(), 
-    #                                   window_length=9, polyorder=2)
+
+    # calculate crack lengths and DeltaKs
     df['a'] = df['alpha']*W
     df['a_err'] = df['alpha_err']*W
     df['Kmin'] = P_to_K(df['Pmin'], B, W, df['alpha'])
     df['Kmax'] = P_to_K(df['Pmax'], B, W, df['alpha'])
     df['DeltaK'] = df['Kmax'] - df['Kmin']
 
+    # crack velocity and uncertainty then add to df
     dadN = np.gradient(df['a'], df['cycles'])
 
     numerator = [i**2 + j**2 for i,j in zip(df['a_err'],df['a_err'].shift(-1))]
@@ -481,22 +500,53 @@ def fatigue_compliance_CT(df, sample_dict, **kwargs):
     df['dadN'] = dadN
     df['dadN_err'] = [np.nan] + dadN_err
 
+    # filter out negative speeds
     df = df.dropna().query('dadN > 0')
 
-    #df['dadN_log'] = np.log(df['dadN'])
-    #df['dadN_log_smooth'] = savgol_filter(df['dadN_log'].to_numpy(),
-    #                                      window_length=9, polyorder=2)
-    #df['dadN_smooth'] = np.exp(df['dadN_log_smooth'])
-
-    #print(df['a'].iloc[-1] - df['a'].iloc[0])
-    #print(simpson(df['dadN'], df['cycles']))
-
-    # add uncertainties
+    # add uncertainties?
 
 
     return df
 
 def fatigue_plot_CT(df, **kwargs):
+    '''
+    Fits fatigue crack growth data to Paris Law and plots results.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Fatigue crack growth experimental data read using read_fatigue_CT and
+        processed using fatigue_compliance_CT.
+
+    detailed : bool, default False
+        Flag to return additional experimental plots. If False, only
+        da/dN vs. DeltaK with fit is returned.
+
+    min_speed : float, default 5e-5
+        Minimum crack velocity for filtering out noise for the fitting.
+
+    title : str, default None
+        Optional title for the plots.
+
+    savepath : Path, default None
+        Optional path to save the plots.
+    
+    Returns
+    -------
+    m : float
+        Crack growth sensitivity exponent
+
+    m_err : float
+        Uncertainty of m
+
+    Kthr : float
+        Lower threshold DeltaK used for fitting
+
+    Kc : float
+        Upper threshold DeltaK, i.e. max observed
+    
+    '''
+    
 
     detailed = kwargs.get('detailed', False)
     min_speed = kwargs.get('min_speed', 5e-5)
@@ -513,21 +563,22 @@ def fatigue_plot_CT(df, **kwargs):
         thr_cycle = 0
     Kthr = df.query('cycles > @thr_cycle')['DeltaK'].iloc[0]
 
+    # filter over range of reliable K
     fit_df = df.query('DeltaK > @Kthr')
     fit_df = fit_df.query('DeltaK < @Kc')
 
-    def parisLaw(k, A, m):
-        return A*k**m
-
-    popt, pcov = curve_fit(parisLaw, fit_df['DeltaK'], fit_df['dadN'],
+    # perform the fit
+    popt, pcov = curve_fit(power_law, fit_df['DeltaK'], fit_df['dadN'],
                             p0=[1e-5, 20],
                             bounds=([0,1],[10,40]))
-    
+
+    # assign the fitted parameters and uncertainties
     A, m = popt
     A_err, m_err = np.sqrt(np.diag(pcov))
 
+    # create fitting curve
     fitK = np.arange(Kthr, Kc, 0.01)
-    fitdadN = parisLaw(fitK, A, m)
+    fitdadN = power_law(fitK, A, m)
 
     if detailed:
         set_default_cycler()
@@ -551,7 +602,6 @@ def fatigue_plot_CT(df, **kwargs):
         cb = plt.colorbar(sm, ax=ax[0], cmap=cmap, norm=norm, label='Cycle')
     
         # crack length vs. cycles plot
-
         ax[1].plot(df['cycles'], df['a'], 'o')
         ax[1].set_xlabel('Cycles')
         ax[1].set_ylabel('Crack Length, a (mm)')
@@ -569,6 +619,7 @@ def fatigue_plot_CT(df, **kwargs):
     
     else:
 
+        # just the crack velocity plot
         set_default_cycler()
         fig, ax = plt.subplots(1,1, figsize=(4,3), constrained_layout=True)
 
@@ -582,10 +633,12 @@ def fatigue_plot_CT(df, **kwargs):
                 label=f'm = {m:0.2f} $\\pm$ {m_err:0.2f}')
         ax.legend()
 
+    # add a title
     if title:
         plt.suptitle(title)
     plt.show(block=False)
 
+    # save the plot
     if savepath:
         plt.savefig(savepath)
 
