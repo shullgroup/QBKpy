@@ -697,14 +697,24 @@ def read_data_file(
         # Single sheet
         else:
 
-            df = pd.read_excel(
+            col_map = target_cols  # [time_in, temp_in, q_in]
+            
+            raw = pd.read_excel(
                 path,
-                usecols=target_cols,
-                names=names,
+                usecols=sorted(set(col_map)),
                 skiprows=skiprows,
-                header=header,
+                header=None,
                 sheet_name=sheet_name,
             )
+            
+            # Give columns their Excel indices as names
+            raw.columns = sorted(set(col_map))
+            
+            df = pd.DataFrame({
+                'time_in': raw[col_map[0]],
+                'temp_in': raw[col_map[1]],
+                'q_in':    raw[col_map[2]],
+            })
 
     # ------------------------------------------------------------
     # Text files
@@ -991,138 +1001,29 @@ def downsample_df_per_decade(
     return df.iloc[ordered_idx].copy()
 
 
-def baseline_correct_old(df, x_col, y_col, x_range=None):
-    """
-    Apply linear baseline correction to q vs temp using two anchor temperatures.
-
-    Parameters
-    ----------
-    df : pandas.DataFrame
-    y : str
-        Name of y data column
-    x_col : str
-        Name of a data column
-    x_range : list or tuple (t1, t2)
-        Two x values used to determine baseline
-
-    Returns
-    -------
-    df_out : pandas.DataFrame
-        Copy of dataframe with added 'y_corrected' column
-    """
-
-    if x_range is None or len(x_range) != 2:
-        raise ValueError("x_range must be a two-element list or tuple")
-
-    x1, x2 = x_range
-
-    # Select rows at (or nearest to) the two temperatures
-    idx1 = (df[x_col] - x1).abs().idxmin()
-    idx2 = (df[x_col] - x2).abs().idxmin()
-
-    # Extract anchor points
-    x = df.loc[[idx1, idx2], x_col].values
-    y = df.loc[[idx1, idx2], y_col].values
-
-    # Fit line (slope m, intercept b)
-    m, b = np.polyfit(x, y, 1)
-
-    # Compute baseline for all temps
-    baseline = m * df[x_col] + b
-
-    # Subtract baseline
-    df_out = df.copy()
-    df_out[y_col] = df[y_col] - baseline
-
-    return df_out
 
 
-def baseline_correct_old(df, x_col, y_col, x_range=None, n=10):
-    """
-    Apply linear baseline correction using two anchor x values.
-    The baseline is determined from the average of the n data points
-    closest to each anchor value.
-
-    Parameters
-    ----------
-    df : pandas.DataFrame
-    x_col : str
-        Name of x data column.
-    y_col : str
-        Name of y data column.
-    x_range : list or tuple (x1, x2)
-        Two x values used to determine baseline.
-    n : int, default=10
-        Number of nearest points to average around each anchor.
-
-    Returns
-    -------
-    pandas.DataFrame
-        Copy of dataframe with baseline subtracted from y_col.
-    """
-
-    if x_range is None or len(x_range) != 2:
-        raise ValueError("x_range must be a two-element list or tuple")
-
-    if len(df) < n:
-        return df.copy()
-
-    x1, x2 = x_range
-
-    # Find n points closest to each anchor
-    nearest1 = df.iloc[(df[x_col] - x1).abs().argsort()[:n]]
-    nearest2 = df.iloc[(df[x_col] - x2).abs().argsort()[:n]]
-
-    # Use average x and y values for each anchor
-    x_anchor = np.array([
-        nearest1[x_col].mean(),
-        nearest2[x_col].mean()
-    ])
-
-    y_anchor = np.array([
-        nearest1[y_col].mean(),
-        nearest2[y_col].mean()
-    ])
-
-    # Fit baseline line
-    m, b = np.polyfit(x_anchor, y_anchor, 1)
-
-    # Evaluate baseline
-    baseline = m * df[x_col] + b
-
-    # Correct data
-    df_out = df.copy()
-    df_out[y_col] = df[y_col] - baseline
-
-    return df_out
-
-def baseline_correct(df, x_col, y_col, x_range=None, n=10):
+def baseline_correct(df, x_col, y_col, baseline, n=10):
     """
     Apply linear baseline correction using two anchor x values.
     The baseline is determined from the average of the n data points
     closest to each anchor value.
     """
-
-    if x_range is None or len(x_range) != 2:
-        raise ValueError("x_range must be a two-element list or tuple")
+    
 
     if len(df) < n:
         return df.copy()
 
-    x1, x2 = x_range
+    x1, x2 = [baseline[0], baseline[1]]
 
     # Find nearest points and keep only valid y values
-    nearest1 = (
-        df.iloc[(df[x_col] - x1).abs().argsort()]
-        .dropna(subset=[y_col])
-        .head(n)
-    )
+    nearest1 = (df.iloc[(df[x_col] - x1).abs().argsort()]
+                .dropna(subset=[y_col])
+                .head(n))
 
-    nearest2 = (
-        df.iloc[(df[x_col] - x2).abs().argsort()]
-        .dropna(subset=[y_col])
-        .head(n)
-    )
+    nearest2 = (df.iloc[(df[x_col] - x2).abs().argsort()]
+                .dropna(subset=[y_col])
+                .head(n))
 
     # If either endpoint does not have n valid points, return unchanged
     if len(nearest1) < n or len(nearest2) < n:
@@ -1143,11 +1044,15 @@ def baseline_correct(df, x_col, y_col, x_range=None, n=10):
     m, b = np.polyfit(x_anchor, y_anchor, 1)
 
     # Evaluate baseline
-    baseline = m * df[x_col] + b
+    baseline_vals = m * df[x_col] + b
 
     # Correct data
     df_out = df.copy()
-    df_out[y_col] = df[y_col] - baseline
+    df_out[y_col] = df[y_col] - baseline_vals
+    
+    if len(baseline) ==3:
+        idx_ref = (df_out[y_col] - baseline[2]).abs().idxmin()
+        df_out[y_col] = df_out[y_col] - df_out.loc[idx_ref, y_col]
 
     return df_out
 
@@ -1179,4 +1084,13 @@ def add_scaled_right_axis(ax, factor, label, precision=2):
     ax.callbacks.connect("ylim_changed", sync_right_axis)
 
     return ax_right
+
+
+def calc_deriv(df, a, b):
+       da = np.gradient(df[a])
+       db = np.gradient(df[b])
+       
+       return np.divide(da, db,
+                        out=np.full_like(da, np.nan, dtype=float),
+                        where=db != 0)
 

@@ -5,17 +5,13 @@ import numpy as np
 import pandas as pd
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from matplotlib.patches import FancyArrowPatch
 
 from scipy.optimize import curve_fit, least_squares
-from scipy.integrate import quad
 from scipy.special import gamma as gammaf
 from scipy.special import digamma
 from pymittagleffler import mittag_leffler
-
 from utils import read_data_file
-from models import gaussian, arrhenius, vft
-from graphics import double_headed_arrow, vline
+
 
 
 # axis labels

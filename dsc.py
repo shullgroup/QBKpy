@@ -2,33 +2,34 @@
 # https://github.com/shullgroup/QBKPy/blob/main/dsc.py
 import numpy as np
 import pandas as pd
-from scipy.signal import savgol_filter
-from utils import (read_data_file, baseline_correct)
 from models import fit_gaussian
+import utils
 
 labels = {'temp': r'T ($^\circ$C)',
           'temp_in': r'T ($^\circ$C)',
           'time': r't (min.)',
           'time_in': r't (min.)',
-          'q': r'q (Watts$\cdot$g$^{-1}$)'+'\n'+r'exo $\longrightarrow$',
-          'q_in': r'q (Watts$\cdot$g$^{-1}$)'+'\n'+r'exo $\longrightarrow$',
-          'q_r': r'$q/r$ (J$\cdot$g$^{-1}\cdot$K$^{-1}$)',
-          'dqdT': ('$dq/dT$ (Watts$\cdot$K$^{-1}$g$^{-1}$)'+
-                   '\n'+r'exo $\longrightarrow$')}
+          'q.exo': r'q (Watts$\cdot$g$^{-1}$)'+'\n'+r'exo $\longrightarrow$',
+          'q_in.exo': r'q (Watts$\cdot$g$^{-1}$)'+'\n'+r'exo $\longrightarrow$',
+          'q.endo': r'q (Watts$\cdot$g$^{-1}$)'+'\n'+r'endo $\longrightarrow$',
+          'q_in.endo': r'q (Watts$\cdot$g$^{-1}$)'+'\n'+r'endo $\longrightarrow$',
+          'q_r': r'$q/r$ (J$\cdot$g$^{-1}\cdot$K$^{-1}$',
+          'q_r.exo': (r'$q/r$ (J$\cdot$g$^{-1}\cdot$K$^{-1}$)'+
+                   '\n'+r'exo $\longrightarrow$'),
+          'q_r.endo': (r'$q/r$ (J$\cdot$g$^{-1}\cdot$K$^{-1}$)'+
+                   '\n'+r'endo $\longrightarrow$'),
+          'dqdT.exo': ('$dq/dT$ (Watts$\cdot$K$^{-1}$g$^{-1}$)'+
+                   '\n'+r'exo $\longrightarrow$'),
+          'dqdT.endo': ('$dq/dT$ (Watts$\cdot$K$^{-1}$g$^{-1}$)'+
+                   '\n'+r'endo $\longrightarrow$')}
 
 
-def read_dsc(path, mode='conv', **kwargs):
+def read_dsc(path, columns = [0,1,2], **kwargs):
     """
     Read Differential Scanning Calorimetry (DSC) data from a text,
     CSV, or spreadsheet file and return the results as a pandas
     DataFrame.
 
-    The function supports both conventional DSC ("conv") and
-    modulated DSC ("mdsc") data formats. Input files are read using
-    `utils.read_data_file()`, selected columns are renamed to
-    standardized variable names, and optional preprocessing steps are
-    applied.
- 
     For conventional DSC data, the raw signals are smoothed using
     `utils.spline_smooth()`, after which first derivatives with
     respect to time and temperature are calculated.
@@ -37,24 +38,14 @@ def read_dsc(path, mode='conv', **kwargs):
     ----------
     path : str or pathlib.Path
         Path to the DSC data file.
- 
-    mode : {'conv', 'mdsc'}, optional
-        Type of DSC data to process.
- 
-        - 'conv' : Conventional DSC data containing time,
-          temperature, and heat-flow measurements.
-        - 'mdsc' : Modulated DSC data containing reversing and
-          non-reversing heat-flow components.
- 
-        Default is 'conv'.
+    
+    columns : sequence of int, optional
+        Column indices to extract from the source file in order of time (min),
+        temp (deg. C) and heat flow (J/g).  Default is 0, 1, 2
  
     Other Parameters
     ----------------
-    smooth_factor : float, optional
-        Smoothing factor passed to `utils.spline_smooth()` when
-        processing conventional DSC data. Larger values produce
-        smoother signals. Default is 1.
- 
+
     sep : str, optional
         Column delimiter used when reading text files.
         Default is '\\t'.
@@ -63,10 +54,6 @@ def read_dsc(path, mode='conv', **kwargs):
         Worksheet(s) to read when the input file is an Excel workbook.
         Passed directly to `utils.read_data_file()`.
         Default is [0].
- 
-    columns : sequence of int, optional
-        Column indices to extract from the source file. If omitted,
-        mode-specific defaults are used.
  
     time_to_sec : bool, optional
         If True, converts the input time values from minutes to
@@ -105,21 +92,13 @@ def read_dsc(path, mode='conv', **kwargs):
     sampled data.
     """
 
-    smooth_factor = kwargs.get('smooth_factor', 1)
     sep = kwargs.get('sep', '\t')
     sheet_name = kwargs.get('sheet_name', [0])
-
-    # Determine columns based on mode
-    if mode == 'mdsc':
-        target_cols, names = [0, 1, 2, 3, 7], ['time_in', 'temp', 'q_rev', 'q_non', 'dq_revdT']
-    else:
-        target_cols, names = [0, 1, 2], ['time_in', 'temp_in', 'q_in']
+    names = ['time_in', 'temp_in', 'q_in']
         
-    
-    target_cols = kwargs.get('columns', target_cols)
 
     df = utils.read_data_file(path, sep=sep,
-                        target_cols=target_cols,
+                        target_cols=columns,
                         names=names,
                         sheet_name = sheet_name)
 
@@ -128,17 +107,16 @@ def read_dsc(path, mode='conv', **kwargs):
         df['time_in'] = df['time_in'] * 60
 
     # Conventional DSC derivative
-    if mode == 'conv':
-        cols = ['time_in', 'temp_in', 'q_in']
-        
-        df[cols] = df[cols].apply(pd.to_numeric, errors='coerce')
-        df = df.dropna(subset=cols)
+
+    cols = ['time_in', 'temp_in', 'q_in']
+    
+    df[cols] = df[cols].apply(pd.to_numeric, errors='coerce')
+    df = df.dropna(subset=cols)
 
 
-    if mode == 'conv':
-        for var in ['time', 'temp', 'q']:
-            var_smooth = utils.savgol_interpolate(df[f'{var}_in'])
-            df.insert(df.columns.get_loc(f'{var}_in')+1, var, var_smooth)
+    for var in ['time', 'temp', 'q']:
+        var_smooth = utils.savgol_interpolate(df[f'{var}_in'])
+        df.insert(df.columns.get_loc(f'{var}_in')+1, var, var_smooth)
        
     return df
 
@@ -176,19 +154,23 @@ def read_segmented_dsc(path,
                                     window_length=savgol_window,
                                     polyorder=savgol_polyorder)
         
-        dq = np.gradient(df['q'])
-        dT = np.gradient(df['temp'])
-        
-        df['dqdT'] = np.divide(dq, dT,
-            out=np.full_like(dq, np.nan, dtype=float),
-            where=dT != 0)
+        df['dqdT'] = calc_dqdT(df)
         
         segments[k]['df'] = df
         k += 1
     return segments
 
+def calc_dqdT(df):
+       dq = np.gradient(df['q'])
+       dT = np.gradient(df['temp'])
+       
+       return np.divide(dq, dT,
+                        out=np.full_like(dq, np.nan, dtype=float),
+                        where=dT != 0)
+   
 
-def plot_dsc(df_in, ax, xdata, ydata, 
+
+def plot_dsc(df_in, ax, xdata_full, ydata_full, 
              baseline = None,
              T_range = None,
              showTg = False,
@@ -197,8 +179,8 @@ def plot_dsc(df_in, ax, xdata, ydata,
     '''
     Generate typical plots for DSC experiments. Emphasis primarily placed
     on finding Tg as opposed to other transitions for now.
-    Data assumed to be 'Exo Up' - reverse the sign before plotting if this is
-    not the case
+    .exo and .endo are added to indicate which values are assumed to be positive
+    for valules for data values connected with the heat flow
 
     Parameters
     ----------
@@ -206,6 +188,9 @@ def plot_dsc(df_in, ax, xdata, ydata,
         DataFrame containing experimental data read in from the readDSC function
     ax : mpl.axes.Axes, default None
             Axes for the heat flow if one already exists.
+    xdata_full, ydata_full, data columns to plot, including .exo or .endo extentions
+        to specify the correct axis labeling.  These get stripped out when 
+        determining the data columns to plot.
     baseline : list of two floats, default None
         x vlues to use for baseline correction, ignored if equal to []
     T_range : list of two floats, default None
@@ -217,18 +202,14 @@ def plot_dsc(df_in, ax, xdata, ydata,
     plot_options : dictionary of plot options passed directly to the 
         matplotlib plot function
 
-    
-    Returns
-    -------
-    Tg : float
-        Glass transition temperature (Tg) in deg. Celsius.
-
     '''
 
     df = df_in.copy()
+    xdata = xdata_full.split('.')[0]
+    ydata = ydata_full.split('.')[0]
 
     # apply baseline correction if needed
-    if baseline != None and len(baseline) == 2:
+    if baseline != None:
         df = utils.baseline_correct(df, xdata, ydata, baseline)
     
     # clean up dataframe
@@ -239,11 +220,12 @@ def plot_dsc(df_in, ax, xdata, ydata,
         df = df.loc[df['temp'].between(*T_range)]
     
     # ceate axis lables
-    ax.set_xlabel(labels[xdata])
-    ax.set_ylabel(labels[ydata])
+    ax.set_xlabel(labels[xdata_full])
+    ax.set_ylabel(labels[ydata_full])
     
     # ax.set_prop_cycle(default_cycler)
-    ax.plot(df[xdata], df[ydata], fmt, **plot_options)
+    ax.plot(df[xdata.split('.')[0]], 
+            df[ydata.split('.')[0]], fmt, **plot_options)
            
 
 def fit_gaussian_dsc(df: pd.DataFrame, ax, **kwargs):

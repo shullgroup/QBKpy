@@ -3,9 +3,8 @@
 
 import numpy as np
 import pandas as pd
+import utils
 from scipy.optimize import curve_fit
-import matplotlib.pyplot as plt
-from .utils import baseline_correct
 
 # universal gas constant
 R = 8.3145
