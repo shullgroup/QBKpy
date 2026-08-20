@@ -14,9 +14,9 @@ import matplotlib.ticker as mticker
 from scipy.signal import savgol_filter
 from sympy import symbols, diff, log, sqrt, lambdify, Rational
 from copy import deepcopy
-from .utils import set_default_cycler
-from .fracture import KIcfx, deriv_KIcfx, P_to_K
-from .models import power_law
+import utils
+import fracture
+import models
 
 # a is the crack length
 # W is the sample width in the direction of crack propgation
@@ -486,8 +486,8 @@ def fatigue_compliance_CT(df, sample_dict, **kwargs):
     # calculate crack lengths and DeltaKs
     df['a'] = df['alpha']*W
     df['a_err'] = df['alpha_err']*W
-    df['Kmin'] = P_to_K(df['Pmin'], B, W, df['alpha'])
-    df['Kmax'] = P_to_K(df['Pmax'], B, W, df['alpha'])
+    df['Kmin'] = fracture.P_to_K(df['Pmin'], B, W, df['alpha'])
+    df['Kmax'] = fracture.P_to_K(df['Pmax'], B, W, df['alpha'])
     df['DeltaK'] = df['Kmax'] - df['Kmin']
 
     # crack velocity and uncertainty then add to df
@@ -568,7 +568,7 @@ def fatigue_plot_CT(df, **kwargs):
     fit_df = fit_df.query('DeltaK < @Kc')
 
     # perform the fit
-    popt, pcov = curve_fit(power_law, fit_df['DeltaK'], fit_df['dadN'],
+    popt, pcov = curve_fit(models.power_law, fit_df['DeltaK'], fit_df['dadN'],
                             p0=[1e-5, 20],
                             bounds=([0,1],[10,40]))
 
@@ -578,10 +578,10 @@ def fatigue_plot_CT(df, **kwargs):
 
     # create fitting curve
     fitK = np.arange(Kthr, Kc, 0.01)
-    fitdadN = power_law(fitK, A, m)
+    fitdadN = models.power_law(fitK, A, m)
 
     if detailed:
-        set_default_cycler()
+        utils.set_default_cycler()
         fig, ax = plt.subplots(1,3, figsize=(12,3), constrained_layout=True)
         
         # cycles force-displacement plot
@@ -620,7 +620,6 @@ def fatigue_plot_CT(df, **kwargs):
     else:
 
         # just the crack velocity plot
-        set_default_cycler()
         fig, ax = plt.subplots(1,1, figsize=(4,3), constrained_layout=True)
 
         ax.loglog(df['DeltaK'], df['dadN'], 'o')
@@ -690,9 +689,9 @@ def make_data_dict(directory, df_in, row):
     dmax = np.zeros(ngroups)  # maximum displacement
     Pmin = np.zeros(ngroups)  # minimum load
     Pmax = np.zeros(ngroups)  # maximum load   
-    phi = np.zeros(ngroups)  # effective phase angle
     cycle = np.zeros(ngroups)  # cycle number for current group
     
+    phi = {}
     for g in np.arange(ngroups):
         detail[g]={'load':{}, 'unload':{}}  
         # first index for dictionary refers to the group
@@ -946,10 +945,6 @@ def make_intermediate_plots_KIC(data_dict, win_size):
         ax[1,1].set_title('(d)')
         plt.savefig("../figures/intermediate/"+str(data_dict['filename'])+".pdf")
         
-def make_intermediate_plots_pureshear(data_dict, win_size):
-    a=6# placehlder
-
-
 
 def powlaw(x, a, b) :
     return a * np.power(x, b)
@@ -978,6 +973,112 @@ def curve_fit_log(xdata, ydata) :
     
     # There is no need to apply fscalex^-1 as original data is already available
     return (popt_log, pcov_log, ydatafit_log)
+
+
+# def sample_color(label):
+#     #correspond color to label/sample type
+#     return CM_color if label == "CM" else (SM_color if label == "SM" else "black")
+
+
+def read_cycles_with_gaps(filepath, skiprows=48, cycle_step=1):
+    #recorded cycles are separated by blank rows in the cvs
+    #return cycles (dataframes with disp and load); cycle_step for later usage
+    df = pd.read_csv(filepath, skiprows=skiprows,
+                     usecols=[3, 4], names=['disp', 'load'])
+    is_blank = df['disp'].isna() | df['load'].isna()
+    gap_indices = np.where(is_blank)[0]
+
+    cycles = []
+    start = 0
+    for gap in gap_indices:
+        if gap - start > 3:
+            cyc = df.iloc[start:gap].dropna()
+            if not cyc.empty:
+                cycles.append(cyc)
+        start = gap + 1
+    #tail after last gap
+    if start < len(df):
+        cyc = df.iloc[start:].dropna()
+        if not cyc.empty:
+            cycles.append(cyc)
+
+    return cycles, cycle_step
+
+#mechanical calcs functions
+def to_stress_strain(disp, load, gauge, width, thickness):
+    #convert raw displacement/load to strain and stress (MPa)
+    strain = (disp - disp[0]) / gauge
+    stress = load / (width * thickness)
+    return strain, stress
+
+# def compute_hysteresis_energy(strain, stress):
+#     #calculate hysteresis energy from loading and unloading
+#     mask = ~np.isnan(strain) & ~np.isnan(stress)
+#     if mask.sum() < 10:
+#         return np.nan
+#     return float(np.abs(np.trapezoid(stress[mask], strain[mask])))
+
+def compute_phase_angle(load, disp):
+    #effective phase angle, normalized hysteresis energy approx
+    #phi in degrees
+    if len(disp) < 10:
+        return np.nan
+
+    area = float(np.abs(np.trapezoid(load, disp)))
+    P0 = float(np.max(load) - np.min(load))
+    d0 = float(np.max(disp) - np.min(disp))
+
+    if P0 <= 0 or d0 <= 0:
+        return np.nan
+
+    sin_phi = np.clip((4 * area) / (np.pi * P0 * d0), -1.0, 1.0)
+    return float(np.degrees(np.arcsin(sin_phi)))
+
+def compute_initial_modulus(strain, stress, stress_threshold=0.02, strain_window=0.05):
+    #modulus from loading (stress threshold to eliminate noise, strain window is low strain lim)
+    #return modulus, strain fit, stress fit for plotting and reporting
+    if len(strain) < 10:
+        return np.nan, None, None
+
+    candidates = np.where(stress >= stress_threshold)[0]
+    if len(candidates) == 0:
+        return np.nan, None, None
+
+    i0 = candidates[0]
+    s0 = strain[i0]
+    window = (strain >= s0) & (strain <= s0 + strain_window)
+    s_fit, sig_fit = strain[window], stress[window]
+
+    if len(s_fit) < 2:
+        return np.nan, None, None
+
+    E, _ = np.polyfit(s_fit, sig_fit, 1)
+    return float(E), s_fit, sig_fit
+
+def loading_curve(strain, stress):
+    #extract the stress and strain into loading only
+    peak = int(np.argmax(strain))
+    return strain[:peak], stress[:peak]
+
+def compute_tearing_energy(strain_load, stress_load, strain_unload, stress_unload, gauge):
+    #compute all 3 energies (G, W_diss, W_in) in J/m^2
+    #MPa·(dimensionless strain) × gauge[mm→m] × 1e6 Pa/MPa = J/m².
+    conversion = 1e6 * (gauge / 1000)          # 1000 * gauge  [J/m²]
+    W_in = float(np.trapezoid(stress_load,   strain_load))   * conversion
+    G = float(np.trapezoid(stress_unload, strain_unload)) * conversion
+    W_diss = W_in - G
+    return W_in, G, W_diss
+
+# def make_cycle_colormap(plotted_cycles, extra_fraction=0.3):
+#     #colormap - magma, not too light
+#     n = len(plotted_cycles)
+#     cmap = colormap()
+#     cmap.colormap      = "magma"
+#     cmap.minimum_value = 0
+#     cmap.maximum_value = n - 1 + n * extra_fraction
+#     cmap.set_colormap()
+#     cmap.set_normalization()
+#     return cmap
 
 
 

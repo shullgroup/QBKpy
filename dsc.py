@@ -13,14 +13,14 @@ labels = {'temp': r'T ($^\circ$C)',
           'q_in.exo': r'q (Watts$\cdot$g$^{-1}$)'+'\n'+r'exo $\longrightarrow$',
           'q.endo': r'q (Watts$\cdot$g$^{-1}$)'+'\n'+r'endo $\longrightarrow$',
           'q_in.endo': r'q (Watts$\cdot$g$^{-1}$)'+'\n'+r'endo $\longrightarrow$',
-          'q_r': r'$q/r$ (J$\cdot$g$^{-1}\cdot$K$^{-1}$',
+          'q_r': r'$q/r$ (J$\cdot$g$^{-1}\cdot$K$^{-1}$)',
           'q_r.exo': (r'$q/r$ (J$\cdot$g$^{-1}\cdot$K$^{-1}$)'+
-                   '\n'+r'exo $\longrightarrow$'),
+                   '\n'+r'exo $\longrightarrow$)'),
           'q_r.endo': (r'$q/r$ (J$\cdot$g$^{-1}\cdot$K$^{-1}$)'+
                    '\n'+r'endo $\longrightarrow$'),
-          'dqdT.exo': ('$dq/dT$ (Watts$\cdot$K$^{-1}$g$^{-1}$)'+
+          'dqdT.exo': ('$dq/dT$ (mW$\cdot$K$^{-1}$g$^{-1}$)'+
                    '\n'+r'exo $\longrightarrow$'),
-          'dqdT.endo': ('$dq/dT$ (Watts$\cdot$K$^{-1}$g$^{-1}$)'+
+          'dqdT.endo': ('$dq/dT$ (mW$\cdot$K$^{-1}$g$^{-1}$)'+
                    '\n'+r'endo $\longrightarrow$')}
 
 
@@ -120,14 +120,57 @@ def read_dsc(path, columns = [0,1,2], **kwargs):
        
     return df
 
-
-def read_segmented_dsc(path,
+def read_segmented_dsc_old(path,
     apply_savgol=True,
     savgol_window=151,
     savgol_polyorder=4,
-    end_temp_width = 10
+    end_temp_width=10
     ):
+    """
+    Read a segmented DSC Excel file and return processed data for each segment.
 
+    Each worksheet in the Excel file is interpreted as a separate DSC segment.
+    Temperature and heat-flow data are loaded, optionally smoothed using a
+    Savitzky-Golay filter, and used to calculate dQ/dT. Heating and cooling
+    rates are estimated from the temperature and time span of each segment.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        Path to the Excel workbook containing segmented DSC data. Each sheet
+        should contain columns for time, temperature, and heat flow, with the
+        first three rows reserved for metadata.
+    apply_savgol : bool, default=True
+        If True, apply Savitzky-Golay smoothing to temperature and heat-flow
+        signals before calculating dQ/dT.
+    savgol_window : int, default=151
+        Window length used for Savitzky-Golay smoothing.
+    savgol_polyorder : int, default=4
+        Polynomial order used for Savitzky-Golay smoothing.
+    end_temp_width : float, default=10
+        Width (in temperature units) removed from the ends of high-rate scans
+        prior to smoothing when ``abs(rate) > 0.9``.
+
+    Returns
+    -------
+    dict
+        Dictionary of processed segments indexed by integer key. Each segment
+        contains:
+
+        - ``name`` : worksheet name
+        - ``rate`` : average scan rate (temperature units per unit time)
+        - ``df`` : pandas.DataFrame containing:
+            - ``time`` : time
+            - ``temp`` : processed temperature
+            - ``q`` : processed heat flow
+            - ``dqdT`` : derivative of heat flow with respect to temperature
+
+    Notes
+    -----
+    Empty worksheets are skipped. If smoothing is enabled, high-rate segments
+    may have endpoint data removed using ``remove_extreme_temps()`` before the
+    Savitzky-Golay filter is applied.
+    """
     df_dict = pd.read_excel(path, sheet_name = None, header=None, 
                             names = ['time', 'temp_in', 'q_in'],
                             skiprows=3)
@@ -144,9 +187,10 @@ def read_segmented_dsc(path,
         df['q'] = df['q_in']
         segments[k]['rate'] = ((df.iloc[-1]['temp']-df.iloc[0]['temp'])/
                                (df.iloc[-1]['time']-df.iloc[0]['time']))
-        if abs(segments[k]['rate'])>0.9:
-            df = remove_extreme_temps(df, end_temp_width)
+
         if apply_savgol:
+            if abs(segments[k]['rate'])>0.9:
+                df = remove_extreme_temps(df, end_temp_width)
             df['q'] = utils.savgol_smooth(df['q'], 
                                     window_length=savgol_window,
                                     polyorder=savgol_polyorder)
@@ -158,13 +202,136 @@ def read_segmented_dsc(path,
         
         segments[k]['df'] = df
         k += 1
+    
+    return segments
+
+
+def read_segmented_dsc(
+    path,
+    apply_savgol=True,
+    savgol_window=151,
+    savgol_polyorder=4,
+    end_temp_width=10,
+):
+    """
+    Read a segmented DSC Excel file and return processed data for each segment.
+
+    Each worksheet in the Excel file is interpreted as a separate DSC segment.
+    Temperature and heat-flow data are loaded, optionally smoothed using a
+    Savitzky-Golay filter, and used to calculate dQ/dT. An additional
+    concatenated dataframe containing all segments is returned as
+    ``segments['all']['df']``.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        Path to the Excel workbook containing segmented DSC data.
+    apply_savgol : bool, default=True
+        If True, apply Savitzky-Golay smoothing to temperature and heat-flow
+        signals before calculating dQ/dT.
+    savgol_window : int, default=151
+        Window length used for Savitzky-Golay smoothing.
+    savgol_polyorder : int, default=4
+        Polynomial order used for Savitzky-Golay smoothing.
+    end_temp_width : float, default=10
+        Temperature span removed from the ends of high-rate scans prior to
+        smoothing when ``abs(rate) > 0.9``.
+
+    Returns
+    -------
+    dict
+        Dictionary containing one entry per segment and an additional
+        ``'all'`` entry.
+
+        Each segment dictionary contains:
+
+        - ``name`` : worksheet name
+        - ``rate`` : average scan rate
+        - ``df`` : processed dataframe
+
+        ``segments['all']['df']`` contains all segment dataframes
+        concatenated together, with added columns:
+
+        - ``segment`` : integer segment index
+        - ``segment_name`` : worksheet name
+    """
+
+    df_dict = pd.read_excel(
+        path,
+        sheet_name=None,
+        header=None,
+        names=["time", "temp_in", "q_in"],
+        skiprows=3,
+    )
+
+    segments = {}
+    all_dfs = []
+    k = 0
+
+    for sheet_name, df in df_dict.items():
+
+        df = df.dropna(subset=["time", "temp_in", "q_in"])
+
+        if len(df) == 0:
+            continue
+
+        df = df.copy()
+        df["temp"] = df["temp_in"]
+        df["q"] = df["q_in"]
+
+        rate = (
+            (df.iloc[-1]["temp"] - df.iloc[0]["temp"])
+            / (df.iloc[-1]["time"] - df.iloc[0]["time"])
+        )
+
+        if apply_savgol:
+            if abs(rate) > 0.9:
+                df = remove_extreme_temps(df, end_temp_width)
+
+            df["q"] = utils.savgol_smooth(
+                df["q"],
+                window_length=savgol_window,
+                polyorder=savgol_polyorder,
+            )
+
+            df["temp"] = utils.savgol_smooth(
+                df["temp"],
+                window_length=savgol_window,
+                polyorder=savgol_polyorder,
+            )
+
+        df["dqdT"] = calc_dqdT(df)
+
+        segments[k] = {
+            "name": sheet_name,
+            "rate": rate,
+            "df": df,
+        }
+
+        # Add segment identifiers for the combined dataframe
+        df_all = df.copy()
+        df_all["segment"] = k
+        df_all["segment_name"] = sheet_name
+        all_dfs.append(df_all)
+
+        k += 1
+
+    segments["all"] = {
+        "df": (
+            pd.concat(all_dfs, ignore_index=True)
+            if all_dfs
+            else pd.DataFrame()
+        )
+    }
+
     return segments
 
 def calc_dqdT(df):
        dq = np.gradient(df['q'])
        dT = np.gradient(df['temp'])
        
-       return np.divide(dq, dT,
+       # factor of 1000 changes units to mW/g-K
+       return 1000*np.divide(dq, dT,
                         out=np.full_like(dq, np.nan, dtype=float),
                         where=dT != 0)
    
@@ -175,6 +342,7 @@ def plot_dsc(df_in, ax, xdata_full, ydata_full,
              T_range = None,
              showTg = False,
              fmt = '-',
+             yoffset = 0,
              **plot_options):
     '''
     Generate typical plots for DSC experiments. Emphasis primarily placed
@@ -199,6 +367,8 @@ def plot_dsc(df_in, ax, xdata_full, ydata_full,
         Option to show Tg fit from fit_gaussian.
     fmt : str, default '-'
         Format string
+    yoffset : float
+        Offset to ydata for plotting
     plot_options : dictionary of plot options passed directly to the 
         matplotlib plot function
 
@@ -213,7 +383,7 @@ def plot_dsc(df_in, ax, xdata_full, ydata_full,
         df = utils.baseline_correct(df, xdata, ydata, baseline)
     
     # clean up dataframe
-    df = df.replace([np.inf, -np.inf], np.nan).dropna(subset=['temp', 'q'])
+    df = df.replace([np.inf, -np.inf], np.nan).dropna(subset=[xdata, ydata])
     
     # optional temperature filtering
     if T_range != None and len(T_range) == 2:
@@ -224,8 +394,7 @@ def plot_dsc(df_in, ax, xdata_full, ydata_full,
     ax.set_ylabel(labels[ydata_full])
     
     # ax.set_prop_cycle(default_cycler)
-    ax.plot(df[xdata.split('.')[0]], 
-            df[ydata.split('.')[0]], fmt, **plot_options)
+    ax.plot(df[xdata], df[ydata]+yoffset, fmt, **plot_options)
            
 
 def fit_gaussian_dsc(df: pd.DataFrame, ax, **kwargs):
@@ -515,19 +684,19 @@ def find_monotonic_segments(df_in,
     return segments
 
 
-def remove_extreme_temps(df, n):
+def remove_extreme_temps(df, delT):
     """
     Set 'temp' and 'q' to NaN where 'temp' is within n degrees
     of the minimum or maximum temperature.
     """
-    df = df.copy()
+    df_tmp = df.copy()
 
-    tmin = df['temp'].min()
-    tmax = df['temp'].max()
+    tmin = df_tmp['temp'].min()
+    tmax = df_tmp['temp'].max()
 
-    mask = (df['temp'] < tmin + n) | (df['temp'] > tmax - n)
+    mask = (df_tmp['temp'] < tmin + delT) | (df_tmp['temp'] > tmax - delT)
 
-    df.loc[mask, ['temp', 'q']] = np.nan
+    df_tmp.loc[mask, ['temp', 'q']] = np.nan
 
-    return df
+    return df_tmp
 

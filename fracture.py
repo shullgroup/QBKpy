@@ -4,7 +4,7 @@
 import numpy as np
 import pandas as pd
 
-from .utils import read_data_file
+import utils
 
 def read_kic(path, **kwargs):
 
@@ -12,7 +12,7 @@ def read_kic(path, **kwargs):
     target_cols = kwargs.get('target_cols', [0, 1, 2])
     names = kwargs.get('names', ['time', 'disp', 'force'])
 
-    df = read_data_file(path, sep=sep,
+    df = utils.read_data_file(path, sep=sep,
                         target_cols=target_cols,
                         names=names)
     

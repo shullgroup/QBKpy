@@ -5,14 +5,12 @@ import numpy as np
 import pandas as pd
 import utils
 from scipy.optimize import curve_fit
-import matplotlib.pyplot as plt
-from .utils import baseline_correct
 
 # universal gas constant
 R = 8.3145
 
 # gaussian with baseline
-def gaussian(x, ctr, amp, wid, baseline=0):
+def gaussian(x, ctr, wid, amp, baseline=0):
     """
     Defines a Gaussian function with a baseline.
 
@@ -37,7 +35,7 @@ def gaussian(x, ctr, amp, wid, baseline=0):
     """
     
     return amp * np.exp(-((x - ctr)**2) / (2 * wid**2))
-    # we use baseline_correct so that the y values from the peak are assumed 
+    # we use utils.baseline_correct so that the y values from the peak are assumed 
     # to be zero
 
 def fit_gaussian(
@@ -138,6 +136,9 @@ def fit_gaussian(
     amp : float
         Fitted peak amplitude. For ``peak_direction='min'``, the returned
         amplitude is negative.
+        
+    integral : float
+        integral under the gaussian, (sqrt(2*pi)*wid*amp)
 
     errors : dict
         Dictionary containing one-standard-deviation uncertainties:
@@ -159,7 +160,7 @@ def fit_gaussian(
         print("Warning: DataFrame is empty after cleaning. Cannot fit.")
         return np.nan, np.nan, np.nan, np.nan
     
-    df_clean = baseline_correct(df_clean, x_col, y_col, x_range=baseline)
+    df_clean = utils.baseline_correct(df_clean, x_col, y_col, baseline=baseline)
     if x_range == 'bounds':
         x_range = bounds
     
@@ -189,7 +190,7 @@ def fit_gaussian(
             wid_auto_guess = 1.0 # Fallback to a small positive width
             
 
-        guess = [ctr_auto_guess, amp_auto_guess, wid_auto_guess]
+        guess = [ctr_auto_guess,  wid_auto_guess, amp_auto_guess]
 
     # Default Bounds (very broad to be general)
     if bounds is None:
@@ -218,8 +219,8 @@ def fit_gaussian(
         perr = np.sqrt(np.diag(pcov))
 
         # Unpack parameters and their uncertainties
-        ctr, amp, wid = popt
-        ctr_err, amp_err, wid_err = perr
+        ctr, wid, amp = popt
+        ctr_err, wid_err, amp_err = perr
 
         # Generate Fit Curve for Plotting
         fit_x = np.linspace(x_data.min(), x_data.max(), num=1000)
@@ -230,14 +231,14 @@ def fit_gaussian(
         if peak_direction == 'min':
             plot_amp = -amp
 
-        fit_y = gaussian(fit_x, ctr, plot_amp, wid)
+        fit_y = gaussian(fit_x, ctr, wid, plot_amp)
 
         # Plot if ax is provided
         if ax:
             if plot_label_formatter:
                 label = plot_label_formatter(ctr, wid)
             else:
-                label = f'Center = {ctr:0.1f} \n Width = {wid:0.1f}'
+                label = f'Cen = {ctr:0.1f} \n Wid. = {wid:0.1f} \n Amp. = {amp:0.2f}'
             ax.plot(fit_x, fit_y, ':', color='k', label=label)
             ax.legend()
             
@@ -245,11 +246,13 @@ def fit_gaussian(
                   'wid':wid_err,
                   'amp':amp_err}
         
-        return ctr, amp, wid, errors
+        integral = amp * wid * np.sqrt(2*np.pi)
+        
+        return ctr, wid, amp, integral, errors
 
     except Exception as e:
         print(f"Gaussian fitting failed for {y_col} (x={x_col}): {e}")
-        return np.nan, np.nan, np.nan, {'ctr':np.nan,
+        return np.nan, np.nan, np.nan, np.nan, {'ctr':np.nan,
                                         'wid':np.nan,
                                         'amp':np.nan}
 # arrhenius
