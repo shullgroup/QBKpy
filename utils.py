@@ -466,40 +466,46 @@ def first_line(path, **kwargs):
         # Multiple sheets requested
         # --------------------------------------------------------
         if isinstance(sheet_name, (list, tuple)):
-
             results = {}
-
+        
             if ext == ".xlsx":
-
                 wb = load_workbook(
                     path,
                     read_only=True,
                     data_only=True
                 )
-
+        
                 for sh in sheet_name:
-
-                    ws = wb[sh]
-
-                    results[sh] = find_first_numeric_row(
+                    if sh == 0:
+                        ws = wb.worksheets[0]           # first worksheet
+                        key = ws.title                  # use actual sheet name
+                    else:
+                        ws = wb[sh]
+                        key = sh
+        
+                    results[key] = find_first_numeric_row(
                         ws.iter_rows(values_only=True)
                     )
-
+        
             else:  # .xls
-
-                dfs = pd.read_excel(
-                    path,
-                    header=None,
-                    sheet_name=sheet_name
-                )
-
-                for sh, df_sheet in dfs.items():
-
-                    results[sh] = find_first_numeric_row(
-                        (row.tolist()
-                         for _, row in df_sheet.iterrows())
+                xls = pd.ExcelFile(path)
+        
+                for sh in sheet_name:
+                    if sh == 0:
+                        actual_name = xls.sheet_names[0]
+                    else:
+                        actual_name = sh
+        
+                    df_sheet = pd.read_excel(
+                        path,
+                        header=None,
+                        sheet_name=actual_name
                     )
-
+        
+                    results[actual_name] = find_first_numeric_row(
+                        (row.tolist() for _, row in df_sheet.iterrows())
+                    )
+        
             return results
 
         # --------------------------------------------------------
@@ -684,7 +690,7 @@ def read_data_file(
                     path,
                     usecols=target_cols,
                     names=names,
-                    skiprows=skiprows[sh],
+                    skiprows=skiprows,
                     header=header,
                     sheet_name=sh,
                 )
@@ -1051,7 +1057,7 @@ def baseline_correct(df, x_col, y_col, baseline, n=10):
     df_out[y_col] = df[y_col] - baseline_vals
     
     if len(baseline) ==3:
-        idx_ref = (df_out[y_col] - baseline[2]).abs().idxmin()
+        idx_ref = (df_out[x_col] - baseline[2]).abs().idxmin()
         df_out[y_col] = df_out[y_col] - df_out.loc[idx_ref, y_col]
 
     return df_out

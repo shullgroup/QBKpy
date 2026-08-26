@@ -94,116 +94,29 @@ def read_dsc(path, columns = [0,1,2], **kwargs):
 
     sep = kwargs.get('sep', '\t')
     sheet_name = kwargs.get('sheet_name', [0])
-    names = ['time_in', 'temp_in', 'q_in']
-        
-
-    df = utils.read_data_file(path, sep=sep,
-                        target_cols=columns,
-                        names=names,
-                        sheet_name = sheet_name)
+       
+    df = utils.read_data_file(
+        path,
+        sep=sep,
+        sheet_name=sheet_name
+    )
+    
+    df = df.iloc[:, columns]
+    df.columns = ['time', 'temp_in', 'q_in']
 
     # Convert time if requested
     if kwargs.get('time_to_sec', False):
-        df['time_in'] = df['time_in'] * 60
+        df['time'] = df['time'] * 60
 
     # Conventional DSC derivative
 
-    cols = ['time_in', 'temp_in', 'q_in']
+    cols = ['time', 'temp_in', 'q_in']
     
     df[cols] = df[cols].apply(pd.to_numeric, errors='coerce')
     df = df.dropna(subset=cols)
 
-
-    for var in ['time', 'temp', 'q']:
-        var_smooth = utils.savgol_interpolate(df[f'{var}_in'])
-        df.insert(df.columns.get_loc(f'{var}_in')+1, var, var_smooth)
-       
+      
     return df
-
-def read_segmented_dsc_old(path,
-    apply_savgol=True,
-    savgol_window=151,
-    savgol_polyorder=4,
-    end_temp_width=10
-    ):
-    """
-    Read a segmented DSC Excel file and return processed data for each segment.
-
-    Each worksheet in the Excel file is interpreted as a separate DSC segment.
-    Temperature and heat-flow data are loaded, optionally smoothed using a
-    Savitzky-Golay filter, and used to calculate dQ/dT. Heating and cooling
-    rates are estimated from the temperature and time span of each segment.
-
-    Parameters
-    ----------
-    path : str or pathlib.Path
-        Path to the Excel workbook containing segmented DSC data. Each sheet
-        should contain columns for time, temperature, and heat flow, with the
-        first three rows reserved for metadata.
-    apply_savgol : bool, default=True
-        If True, apply Savitzky-Golay smoothing to temperature and heat-flow
-        signals before calculating dQ/dT.
-    savgol_window : int, default=151
-        Window length used for Savitzky-Golay smoothing.
-    savgol_polyorder : int, default=4
-        Polynomial order used for Savitzky-Golay smoothing.
-    end_temp_width : float, default=10
-        Width (in temperature units) removed from the ends of high-rate scans
-        prior to smoothing when ``abs(rate) > 0.9``.
-
-    Returns
-    -------
-    dict
-        Dictionary of processed segments indexed by integer key. Each segment
-        contains:
-
-        - ``name`` : worksheet name
-        - ``rate`` : average scan rate (temperature units per unit time)
-        - ``df`` : pandas.DataFrame containing:
-            - ``time`` : time
-            - ``temp`` : processed temperature
-            - ``q`` : processed heat flow
-            - ``dqdT`` : derivative of heat flow with respect to temperature
-
-    Notes
-    -----
-    Empty worksheets are skipped. If smoothing is enabled, high-rate segments
-    may have endpoint data removed using ``remove_extreme_temps()`` before the
-    Savitzky-Golay filter is applied.
-    """
-    df_dict = pd.read_excel(path, sheet_name = None, header=None, 
-                            names = ['time', 'temp_in', 'q_in'],
-                            skiprows=3)
-    segments = {}
-    k=0
-    for i in np.arange(len(df_dict.keys())):
-        segments[k] = {}
-        segments[k]['name'] = list(df_dict.keys())[i]
-        df = df_dict[segments[k]['name']]
-        df = df.dropna(subset=['time', 'temp_in', 'q_in'])
-        if len(df) == 0:
-            continue
-        df['temp'] = df['temp_in']
-        df['q'] = df['q_in']
-        segments[k]['rate'] = ((df.iloc[-1]['temp']-df.iloc[0]['temp'])/
-                               (df.iloc[-1]['time']-df.iloc[0]['time']))
-
-        if apply_savgol:
-            if abs(segments[k]['rate'])>0.9:
-                df = remove_extreme_temps(df, end_temp_width)
-            df['q'] = utils.savgol_smooth(df['q'], 
-                                    window_length=savgol_window,
-                                    polyorder=savgol_polyorder)
-            df['temp'] = utils.savgol_smooth(df['temp'], 
-                                    window_length=savgol_window,
-                                    polyorder=savgol_polyorder)
-        
-        df['dqdT'] = calc_dqdT(df)
-        
-        segments[k]['df'] = df
-        k += 1
-    
-    return segments
 
 
 def read_segmented_dsc(
@@ -211,7 +124,7 @@ def read_segmented_dsc(
     apply_savgol=True,
     savgol_window=151,
     savgol_polyorder=4,
-    end_temp_width=10,
+    end_temp_width=[5, 1],
 ):
     """
     Read a segmented DSC Excel file and return processed data for each segment.
@@ -233,9 +146,8 @@ def read_segmented_dsc(
         Window length used for Savitzky-Golay smoothing.
     savgol_polyorder : int, default=4
         Polynomial order used for Savitzky-Golay smoothing.
-    end_temp_width : float, default=10
-        Temperature span removed from the ends of high-rate scans prior to
-        smoothing when ``abs(rate) > 0.9``.
+    end_temp_width : float, default=[5,1]
+        Temperature span removed from the ends 
 
     Returns
     -------
@@ -283,11 +195,8 @@ def read_segmented_dsc(
             (df.iloc[-1]["temp"] - df.iloc[0]["temp"])
             / (df.iloc[-1]["time"] - df.iloc[0]["time"])
         )
-
+        df = remove_extreme_temps(df, end_temp_width)
         if apply_savgol:
-            if abs(rate) > 0.9:
-                df = remove_extreme_temps(df, end_temp_width)
-
             df["q"] = utils.savgol_smooth(
                 df["q"],
                 window_length=savgol_window,
@@ -472,6 +381,10 @@ def find_monotonic_segments(df_in,
                             frac_thresh=0.05,
                             n_crit=50,
                             ax=None,
+                            apply_savgol = True,
+                            savgol_window=151,
+                            savgol_polyorder=4,
+                            end_temp_width=[5, 1],
                             **kwargs):
     """
     Identify monotonic temperature-program segments from piecewise
@@ -525,6 +438,8 @@ def find_monotonic_segments(df_in,
         Plot format string.
 
         Default is '-'.
+    end_temp_width : float
+        Temperature range to drop at the end of each segment
 
     Returns
     -------
@@ -552,9 +467,11 @@ def find_monotonic_segments(df_in,
     """
 
     df = df_in.copy()
+    df['q'] = df['q_in']
+    df['temp'] = df['temp_in']
 
     time = df['time'].to_numpy()
-    temp = df['temp'].to_numpy()
+    temp = df['temp_in'].to_numpy()
 
     fmt = kwargs.get('fmt', '-')
     block_size = kwargs.get('block_size', 500)
@@ -632,19 +549,17 @@ def find_monotonic_segments(df_in,
                     s = start
                     e = i - 1
     
-                    ramp_rate = (
-                        temp[e] - temp[s]
-                    ) / (
-                        time[e] - time[s]
-                    )
-    
                     df.loc[s:e, 'segment'] = seg_num
+                    df_seg = df.iloc[s:e + 1].copy()
+                    
+                    # don't include segment if it is empty
+                    if len(df_seg) == 0:
+                        continue
     
                     segments[seg_num] = {
                         'type': label,
                         's': s,
                         'e': e,
-                        'ramp_rate': ramp_rate,
                         'idxvals': np.arange(s, e + 1),
                         'df': df.iloc[s:e + 1].copy()
                     }
@@ -680,11 +595,46 @@ def find_monotonic_segments(df_in,
             )
 
         ax.legend()
+    
+    # remove 5 degrees from each end of each segment
+    s = 0
+    for s_tmp in segments.keys():
+        if len(segments[s]['df']) == 0:
+            continue
+        idx_end = segments[s]['df'].index.max()
+        idx_start = segments[s]['df'].index.min()
+        time_end = segments[s]['df'].loc[idx_end, 'time']
+        time_start = segments[s]['df'].loc[idx_start, 'time']
+        temp_end = segments[s]['df'].loc[idx_end, 'temp']
+        temp_start = segments[s]['df'].loc[idx_start, 'temp']
+        ramp_rate = (temp_end - temp_start) / (time_end - time_start)
+        segments[s]['ramp_rate'] = ramp_rate
+        
+        segments[s]['df'] = remove_extreme_temps(segments[s]['df'],
+                                                 end_temp_width)
+        if apply_savgol:
+            segments[s]['df']["q"] = utils.savgol_smooth(
+                segments[s]['df']["q"],
+                window_length=savgol_window,
+                polyorder=savgol_polyorder)
 
+            segments[s]['df']["temp"] = utils.savgol_smooth(
+                segments[s]['df']["temp"],
+                window_length=savgol_window,
+                polyorder=savgol_polyorder)
+
+        df["dqdT"] = calc_dqdT(df)
+               
+        segments[s]['df']['dqdT'] = utils.calc_deriv(
+            segments[s]['df'], 'q', 'temp')
+        segments[s]['df']['dTdt'] = utils.calc_deriv(
+            segments[s]['df'], 'temp', 'time')
+        
+        s += 1
     return segments
 
 
-def remove_extreme_temps(df, delT):
+def remove_extreme_temps_old(df, delT):
     """
     Set 'temp' and 'q' to NaN where 'temp' is within n degrees
     of the minimum or maximum temperature.
@@ -695,6 +645,47 @@ def remove_extreme_temps(df, delT):
     tmax = df_tmp['temp'].max()
 
     mask = (df_tmp['temp'] < tmin + delT) | (df_tmp['temp'] > tmax - delT)
+
+    df_tmp.loc[mask, ['temp', 'q']] = np.nan
+
+    return df_tmp
+
+
+def remove_extreme_temps(df, delT):
+    """
+    Set 'temp' and 'q' to NaN near the beginning and end of the
+    temperature sweep.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Must contain columns 'temp' and 'q'.
+    delT : float or sequence of length 2
+        If a float, the same cutoff is applied to both ends.
+        If a sequence, it should be [delT_beginning, delT_end].
+    """
+    if np.isscalar(delT):
+        delT = [delT, delT]
+
+    df_tmp = df.copy()
+
+    delT_beginning, delT_end = delT
+
+    tmin = df_tmp['temp'].min()
+    tmax = df_tmp['temp'].max()
+
+    increasing = df_tmp['temp'].iloc[-1] > df_tmp['temp'].iloc[0]
+
+    if increasing:
+        mask = (
+            (df_tmp['temp'] < tmin + delT_beginning) |
+            (df_tmp['temp'] > tmax - delT_end)
+        )
+    else:
+        mask = (
+            (df_tmp['temp'] > tmax - delT_beginning) |
+            (df_tmp['temp'] < tmin + delT_end)
+        )
 
     df_tmp.loc[mask, ['temp', 'q']] = np.nan
 
