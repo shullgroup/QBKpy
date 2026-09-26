@@ -1099,4 +1099,98 @@ def calc_deriv(df, a, b):
        return np.divide(da, db,
                         out=np.full_like(da, np.nan, dtype=float),
                         where=db != 0)
+ 
+    
+def remove_extreme_vals(df, var, delvar, columns):
+    """
+    Set selected columns to NaN near the beginning and end of a monotonic
+    coordinate variable.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Input DataFrame.
+
+    var : str
+        Name of the coordinate variable used to determine which rows are
+        masked.
+
+    delvar : float or sequence of two floats
+        Width of the region to remove at the beginning and end of the
+        coordinate range.
+
+        If a scalar is provided, the same width is used at both ends:
+
+            delvar = x
+
+        is equivalent to:
+
+            delvar = [x, x]
+
+        If a two-element sequence is provided, it specifies:
+
+            [beginning_width, end_width]
+
+    columns : list of str
+        Columns whose values will be set to NaN when their corresponding
+        rows fall within the removal regions.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A copy of the input DataFrame with the specified columns set to
+        NaN in rows located near the beginning and end of the coordinate
+        range.
+
+    Notes
+    -----
+    The coordinate direction is determined from the first and last values
+    of `var`.
+
+    For an increasing coordinate, rows are masked when:
+
+        var < min(var) + beginning_width
+
+    or
+
+        var > max(var) - end_width
+
+    For a decreasing coordinate, the beginning and end widths are applied
+    relative to the reversed coordinate direction.
+
+    NaN values in `var` are ignored when computing the minimum and maximum
+    coordinate values.
+    """
+    
+    if np.isscalar(delvar):
+        delvar = [delvar, delvar]
+
+    df_tmp = df.copy()
+
+    delvar_beginning, delvar_end = delvar
+
+    varmin = np.nanmin(df_tmp[var].values)
+    varmax = np.nanmax(df_tmp[var].values)
+
+    s = df_tmp[var].dropna()
+    if s.empty:
+        return df_tmp
+
+    increasing = s.iloc[-1] > s.iloc[0]
+
+
+    if increasing:
+        mask = (
+            (df_tmp[var] < varmin + delvar_beginning) |
+            (df_tmp[var] > varmax - delvar_end)
+        )
+    else:
+        mask = (
+            (df_tmp[var] > varmax - delvar_beginning) |
+            (df_tmp[var] < varmin + delvar_end)
+        )
+
+    df_tmp.loc[mask, columns] = np.nan
+
+    return df_tmp
 

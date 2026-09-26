@@ -195,7 +195,7 @@ def read_segmented_dsc(
             (df.iloc[-1]["temp"] - df.iloc[0]["temp"])
             / (df.iloc[-1]["time"] - df.iloc[0]["time"])
         )
-        df = remove_extreme_temps(df, end_temp_width)
+        df = utils.remove_extreme_vals(df, 'temp', [10, 1], 'q')
         if apply_savgol:
             df["q"] = utils.savgol_smooth(
                 df["q"],
@@ -610,8 +610,12 @@ def find_monotonic_segments(df_in,
         ramp_rate = (temp_end - temp_start) / (time_end - time_start)
         segments[s]['ramp_rate'] = ramp_rate
         
-        segments[s]['df'] = remove_extreme_temps(segments[s]['df'],
-                                                 end_temp_width)
+        segments[s]['df'] = utils.remove_extreme_vals(
+            segments[s]['df'],
+            'temp',
+            end_temp_width,
+            ['q', 'temp']
+            )
         if apply_savgol:
             segments[s]['df']["q"] = utils.savgol_smooth(
                 segments[s]['df']["q"],
@@ -634,60 +638,6 @@ def find_monotonic_segments(df_in,
     return segments
 
 
-def remove_extreme_temps_old(df, delT):
-    """
-    Set 'temp' and 'q' to NaN where 'temp' is within n degrees
-    of the minimum or maximum temperature.
-    """
-    df_tmp = df.copy()
-
-    tmin = df_tmp['temp'].min()
-    tmax = df_tmp['temp'].max()
-
-    mask = (df_tmp['temp'] < tmin + delT) | (df_tmp['temp'] > tmax - delT)
-
-    df_tmp.loc[mask, ['temp', 'q']] = np.nan
-
-    return df_tmp
 
 
-def remove_extreme_temps(df, delT):
-    """
-    Set 'temp' and 'q' to NaN near the beginning and end of the
-    temperature sweep.
-
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        Must contain columns 'temp' and 'q'.
-    delT : float or sequence of length 2
-        If a float, the same cutoff is applied to both ends.
-        If a sequence, it should be [delT_beginning, delT_end].
-    """
-    if np.isscalar(delT):
-        delT = [delT, delT]
-
-    df_tmp = df.copy()
-
-    delT_beginning, delT_end = delT
-
-    tmin = df_tmp['temp'].min()
-    tmax = df_tmp['temp'].max()
-
-    increasing = df_tmp['temp'].iloc[-1] > df_tmp['temp'].iloc[0]
-
-    if increasing:
-        mask = (
-            (df_tmp['temp'] < tmin + delT_beginning) |
-            (df_tmp['temp'] > tmax - delT_end)
-        )
-    else:
-        mask = (
-            (df_tmp['temp'] > tmax - delT_beginning) |
-            (df_tmp['temp'] < tmin + delT_end)
-        )
-
-    df_tmp.loc[mask, ['temp', 'q']] = np.nan
-
-    return df_tmp
 

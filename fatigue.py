@@ -17,6 +17,7 @@ from copy import deepcopy
 import utils
 import fracture
 import models
+from scipy.stats import linregress
 
 # a is the crack length
 # W is the sample width in the direction of crack propgation
@@ -302,7 +303,6 @@ def read_fatigue_CT(folder, sample_dict, **kwargs):
 
         # include extra step if failed at beginning of step
         if multistep:
-            extrastep = maxstep - 2
             df = df.query('step == @maxstep or step == @extrastep').copy()
         
         # show all steps if interested
@@ -549,7 +549,6 @@ def fatigue_plot_CT(df, **kwargs):
     
 
     detailed = kwargs.get('detailed', False)
-    min_speed = kwargs.get('min_speed', 5e-5)
     title = kwargs.get('title', None)
     savepath = kwargs.get('savepath', None)
 
@@ -980,43 +979,140 @@ def curve_fit_log(xdata, ydata) :
 #     return CM_color if label == "CM" else (SM_color if label == "SM" else "black")
 
 
-def read_cycles_with_gaps(filepath, skiprows=48, cycle_step=1):
-    #recorded cycles are separated by blank rows in the cvs
-    #return cycles (dataframes with disp and load); cycle_step for later usage
-    df = pd.read_csv(filepath, skiprows=skiprows,
-                     usecols=[3, 4], names=['disp', 'load'])
-    is_blank = df['disp'].isna() | df['load'].isna()
-    gap_indices = np.where(is_blank)[0]
 
-    cycles = []
-    start = 0
-    for gap in gap_indices:
-        if gap - start > 3:
-            cyc = df.iloc[start:gap].dropna()
-            if not cyc.empty:
-                cycles.append(cyc)
-        start = gap + 1
-    #tail after last gap
-    if start < len(df):
-        cyc = df.iloc[start:].dropna()
-        if not cyc.empty:
-            cycles.append(cyc)
+def read_cycles(filepath, skiprows=48, cycle_step=1,
+                apply_savgol=True,
+                window_length=10,
+                polyorder=3):
+    """
+    Read displacement/load data from a CSV file, optionally smooth the
+    load signal using a Savitzky-Golay filter, convert displacement from
+    millimeters to meters, and partition the data into individual cycles
+    separated by blank rows.
 
-    return cycles, cycle_step
+    Parameters
+    ----------
+    filepath : str or path-like
+        Path to the CSV file containing the raw displacement and load
+        data.
+    skiprows : int, default=48
+        Number of rows to skip at the beginning of the file before
+        reading the data.
+    cycle_step : int, default=1
+        Increment between cycle numbers used as the index of the
+        returned DataFrame.
+    apply_savgol : bool, default=True
+        If True, apply a Savitzky-Golay filter to the raw load data
+        ('P_in') and store the filtered result in the 'P' column. If
+        False, the raw load data are copied directly to 'P'.
+    window_length : int, default=10
+        Window length used by the Savitzky-Golay filter. Only used when
+        `apply_savgol=True`.
+    polyorder : int, default=3
+        Polynomial order used by the Savitzky-Golay filter. Only used
+        when `apply_savgol=True`.
+
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame indexed by cycle number. Each row corresponds to a
+        single cycle and contains:
+
+        - 'data' : DataFrame containing the displacement/load data for
+          that cycle.
+        - 'start' : Starting row index of the cycle in the original
+          dataset.
+        - 'end' : Ending row index of the cycle in the original dataset.
+
+        Within each cycle DataFrame:
+        - 'd' contains displacement in meters.
+        - 'P_in' contains the raw load data.
+        - 'P' contains either the filtered or raw load data depending
+          on the value of `apply_savgol`.
+
+    Notes
+    -----
+    Consecutive blank rows are treated as a single cycle separator.
+    Cycles are numbered starting at 1 and incremented by `cycle_step`.
+    """
+    df = pd.read_csv(
+        filepath,
+        skiprows=skiprows,
+        usecols=[1, 3, 4],
+        names=['t','d','P_in']
+    )
+    
+    if apply_savgol:
+        df['P'] = savgol_filter(df['P_in'], 
+                               window_length=window_length, 
+                               polyorder=polyorder)
+    else:
+        df['P'] = df['P_in']
+
+    # convert displacement to meters
+    df['d'] *= 1e-3
+
+    is_blank = df['d'].isna() | df['P'].isna()
+    gap = np.where(is_blank)[0]
+    #keep only the index for the first row of the gap
+    gap = gap[np.insert(np.diff(gap) > 1, 0, True)]
+    start = np.append(0, gap)
+    end = np.append(gap, len(df))
+    # end extra index so we have the last section
+    
+    gap = np.append(gap, len(df))
+    
+    n = len(gap)
+ 
+    df_cycles = pd.DataFrame(
+        {'data': pd.Series([None] * n, dtype=object),
+         'start': start,
+         'end':end},
+        index=pd.Index(1+cycle_step*np.arange(n), name='cycle'))
+    
+    df_cycles['data'] = [
+        df.iloc[s:e].dropna().copy()
+        for s, e in zip(df_cycles['start'], df_cycles['end'])
+    ]
+    return df_cycles
+
 
 #mechanical calcs functions
-def to_stress_strain(disp, load, gauge, width, thickness):
-    #convert raw displacement/load to strain and stress (MPa)
-    strain = (disp - disp[0]) / gauge
-    stress = load / (width * thickness)
-    return strain, stress
+def add_tensile_stress_strain(df, h, l, b):
+    """
+    Add engineering strain and stress columns to a tensile test DataFrame.
 
-# def compute_hysteresis_energy(strain, stress):
-#     #calculate hysteresis energy from loading and unloading
-#     mask = ~np.isnan(strain) & ~np.isnan(stress)
-#     if mask.sum() < 10:
-#         return np.nan
-#     return float(np.abs(np.trapezoid(stress[mask], strain[mask])))
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        DataFrame containing columns:
+        - 'disp' : displacement values
+        - 'load' : force values
+    h : float
+        Initial gauge length (same units as displacement).
+    l : float
+        Sample length used to calculate cross-sectional area.
+    b : float
+        Sample width used to calculate cross-sectional area.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Input DataFrame with added columns:
+        - 'strain' : engineering strain, disp / h
+        - 'stress' : engineering stress, load / (l * b)
+
+    Notes
+    -----
+    Stress is calculated assuming a rectangular cross-section with
+    area = l * b. Stress units are determined by the units of load
+    and dimensions. For example, if load is in N and dimensions are
+    in mm, stress is in MPa.
+    """
+    # convert raw displacement/load to strain and stress (MPa)
+    df['strain'] = df['d'] / h
+    df['stress'] = df['P'] / (l * b)
+    return df
 
 def compute_phase_angle(load, disp):
     #effective phase angle, normalized hysteresis energy approx
@@ -1025,35 +1121,56 @@ def compute_phase_angle(load, disp):
         return np.nan
 
     area = float(np.abs(np.trapezoid(load, disp)))
-    P0 = float(np.max(load) - np.min(load))
+    p0 = float(np.max(load) - np.min(load))
     d0 = float(np.max(disp) - np.min(disp))
 
-    if P0 <= 0 or d0 <= 0:
+    if p0 <= 0 or d0 <= 0:
         return np.nan
 
-    sin_phi = np.clip((4 * area) / (np.pi * P0 * d0), -1.0, 1.0)
+    sin_phi = np.clip((4 * area) / (np.pi * p0 * d0), -1.0, 1.0)
     return float(np.degrees(np.arcsin(sin_phi)))
 
-def compute_initial_modulus(strain, stress, stress_threshold=0.02, strain_window=0.05):
-    #modulus from loading (stress threshold to eliminate noise, strain window is low strain lim)
-    #return modulus, strain fit, stress fit for plotting and reporting
-    if len(strain) < 10:
-        return np.nan, None, None
+def compute_initial_slope(df, xdata, ydata, y_range=[0.02, 0.1]):
+    """
+    Compute the initial slope of a dataset by fitting a straight line to
+    points whose y-values fall within a specified fraction of the maximum
+    y-value.
 
-    candidates = np.where(stress >= stress_threshold)[0]
-    if len(candidates) == 0:
-        return np.nan, None, None
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        DataFrame containing the data.
+    xdata : str
+        Name of the column containing x-values.
+    ydata : str
+        Name of the column containing y-values.
+    y_range : list of float, optional
+        Two-element list specifying the lower and upper fractions of the
+        maximum y-value that define the fitting range. For example,
+        [0.05, 0.10] fits data where y is between 5% and 10% of the
+        maximum y-value. Default is [0.05, 0.10].
 
-    i0 = candidates[0]
-    s0 = strain[i0]
-    window = (strain >= s0) & (strain <= s0 + strain_window)
-    s_fit, sig_fit = strain[window], stress[window]
+    Returns
+    -------
+    slope : float
+        Slope of the linear fit.
+    intercept : float
+        Intercept of the linear fit.
 
-    if len(s_fit) < 2:
-        return np.nan, None, None
+    Notes
+    -----
+    If fewer than two data points fall within the specified range,
+    the function returns `(np.nan, None, None)` and prints a warning.
+    """
+    ymin, ymax = df[ydata].max() * np.array(y_range)
 
-    E, _ = np.polyfit(s_fit, sig_fit, 1)
-    return float(E), s_fit, sig_fit
+    df_tmp = df[df[ydata].between(ymin, ymax)]
+    if len(df_tmp) < 2:
+        print('less than 2 values in specified range (compute_initial_slope')
+        return np.nan, None
+
+    slope, intercept = np.polyfit(df_tmp[xdata], df_tmp[ydata], 1)
+    return float(slope), float(intercept)
 
 def loading_curve(strain, stress):
     #extract the stress and strain into loading only
@@ -1069,19 +1186,222 @@ def compute_tearing_energy(strain_load, stress_load, strain_unload, stress_unloa
     W_diss = W_in - G
     return W_in, G, W_diss
 
-# def make_cycle_colormap(plotted_cycles, extra_fraction=0.3):
-#     #colormap - magma, not too light
-#     n = len(plotted_cycles)
-#     cmap = colormap()
-#     cmap.colormap      = "magma"
-#     cmap.minimum_value = 0
-#     cmap.maximum_value = n - 1 + n * extra_fraction
-#     cmap.set_colormap()
-#     cmap.set_normalization()
-#     return cmap
+
+def find_load_increase_displacement(d, p,
+                                    min_points=20,
+                                    smooth_window=None):
+    """
+    Find the displacement where load begins to increase.
+
+    Parameters
+    ----------
+    d : array 
+        Displacement values
+    p : array
+        Load values
+    min_points : int
+        Minimum points allowed on each side of the change point.
+    smooth_window : int or None
+        Optional moving-average window applied to load before fitting.
+
+    Returns
+    -------
+    d_start : float
+        Estimated displacement where loading begins.
+    idx : int
+        Row index of the detected change point.
+    """
+
+    # Sort by displacement
+    order = np.argsort(d)
+    d = d[order]
+    p = p[order]
+
+    # Optional smoothing
+    if smooth_window and smooth_window > 1:
+        p = pd.Series(p).rolling(
+            smooth_window,
+            center=True,
+            min_periods=1
+        ).mean().to_numpy()
+
+    best_idx = None
+    best_sse = np.inf
+
+    n = len(d)
+
+    for i in range(min_points, n - min_points):
+
+        # Region 1: constant load
+        p1 = p[:i]
+        mean1 = np.mean(p1)
+        sse1 = np.sum((p1 - mean1) ** 2)
+
+        # Region 2: linear increase
+        d2 = d[i:]
+        p2 = p[i:]
+
+        slope, intercept, *_ = linregress(d2, p2)
+        fit2 = intercept + slope * d2
+        sse2 = np.sum((p2 - fit2) ** 2)
+
+        total_sse = sse1 + sse2
+
+        if total_sse < best_sse:
+            best_sse = total_sse
+            best_idx = i
+
+    return float(d[best_idx]), int(best_idx)
 
 
+def fit_neohookean(df, stress_range=[0.1, 0.9]):
+    """
+    Fit stress-strain data to the Neo-Hookean model
+
+        stress = G * (lambda - 1/lambda**2)
+
+    where
+
+        lambda = 1 + strain + offset
+
+    using only data with experimental stress between
+
+        stress_range[0] * max(stress)
+        stress_range[1] * max(stress)
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        DataFrame containing 'strain' and 'stress' columns.
+
+    stress_range : list, optional
+        Two-element list specifying the lower and upper bounds
+        of the fitting region as fractions of the maximum
+        experimental stress. For example, [0.1, 0.9] fits
+        data between 10% and 90% of the maximum stress.
+
+    Returns
+    -------
+    G : float
+        Fitted shear modulus.
+
+    offset : float
+        Fitted strain offset.
+
+    popt : ndarray
+        Fitted parameters [G, offset].
+
+    pcov : ndarray
+        Covariance matrix from curve_fit.
+
+    df_fit : pandas.DataFrame
+        Subset of the original dataframe used for fitting.
+    """
+
+    stress_max = df['stress'].max()
+
+    stress_min_fit = stress_range[0] * stress_max
+    stress_max_fit = stress_range[1] * stress_max
+
+    df_fit = df[
+        df['stress'].between(stress_min_fit, stress_max_fit)
+    ].copy()
+
+    def model(strain, G, offset):
+        lam = 1 + strain + offset
+        return G * (lam - 1 / lam**2)
+
+    x = df_fit['strain'].to_numpy()
+    y = df_fit['stress'].to_numpy()
+
+    popt, pcov = curve_fit(
+        model,
+        x,
+        y,
+        p0=[y.max(), 0.0],
+        bounds=([0.0, -0.1], [np.inf, 0.1])
+    )
+
+    G, offset = popt
+
+    return G, offset
 
 
+def fit_mooney_rivlin(df, stress_range=[0.1, 0.9]):
+    """
+    Fit stress-strain data to the incompressible uniaxial
+    Mooney-Rivlin model
 
+        stress = 2*(C1 + C2/lambda)*(lambda - 1/lambda**2)
 
+    where
+
+        lambda = 1 + strain + offset
+
+    using only data with experimental stress between
+
+        stress_range[0] * max(stress)
+        stress_range[1] * max(stress)
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        DataFrame containing 'strain' and 'stress' columns.
+
+    stress_range : list, optional
+        Two-element list specifying the lower and upper bounds
+        of the fitting region as fractions of the maximum
+        experimental stress.
+
+    Returns
+    -------
+    C1 : float
+        First Mooney-Rivlin parameter.
+
+    C2 : float
+        Second Mooney-Rivlin parameter.
+
+    offset : float
+        Fitted strain offset.
+
+    popt : ndarray
+        Fitted parameters [C1, C2, offset].
+
+    pcov : ndarray
+        Covariance matrix from curve_fit.
+
+    df_fit : pandas.DataFrame
+        Subset of the original dataframe used for fitting.
+    """
+
+    stress_max = df['stress'].max()
+
+    stress_min_fit = stress_range[0] * stress_max
+    stress_max_fit = stress_range[1] * stress_max
+
+    df_fit = df[
+        df['stress'].between(stress_min_fit, stress_max_fit)
+    ].copy()
+
+    def model(strain, C1, C2, offset):
+        lam = 1 + strain + offset
+        return (
+            2 * (C1 + C2 / lam)
+            * (lam - 1 / lam**2)
+        )
+
+    x = df_fit['strain'].to_numpy()
+    y = df_fit['stress'].to_numpy()
+
+    popt, pcov = curve_fit(
+        model,
+        x,
+        y,
+        p0=[0.5 * y.max(), 0.1 * y.max(), 0.0],
+        bounds=([0.0, 0.0, -0.1],
+                [np.inf, np.inf, 0.1])
+    )
+
+    C1, C2, offset = popt
+
+    return C1, C2, offset

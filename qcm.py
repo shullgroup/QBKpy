@@ -76,6 +76,9 @@ T_coef_default = {'f': {1: [0.00054625, 0.04338, 0.08075, 0],
                         7: [0, 0, 0, 0],
                         9: [0, 0, 0, 0]}}
 
+# default value of f_error, used in calculation of property error bars
+f_error_default = [0.05, 15, 0]
+
 electrode_default = {'drho': 2.8e-3, 'grho3': 3.0e14, 'phi': 0}
 water = {'drho':np.inf, 'grho3':9.4e7, 'phi':90}
 air = {'drho':np.inf, 'grho3':0, 'phi':90}
@@ -1958,8 +1961,6 @@ def calc_fstar_err (n, row, f_error):
         -uncertainty in f/n (applied individually to harmonics)
         
         -uncertaintiy in correlated f/n (not used here)
-             
-        default is [0.05, 15, 0], set to [0,0,0] to elminate error bars
             
     Returns
     -------
@@ -1999,8 +2000,6 @@ def calc_prop_error(soln, f_error):
         -uncertainty in f/n (applied individually to harmonics)
         
         -uncertainty in correlated f/n (same error applied to all delf/n)
-             
-        default is [0.05, 15, 0]
 
     Returns
     -------
@@ -2689,7 +2688,8 @@ def plot_props(soln, figdic, **kwargs):
         
         -uncertaintiy in correlated f/n (applied to all harmonics)]
              
-        default is [0.05, 15, 0], set to [0,0,0] to elminate error bars
+        default is set at top section of this file, typically [0.05, 15, 0], 
+        set to [0,0,0] to elminate error bars
     nplot (list of integers):
         harmonics to plot, default is [3,5])
     plot_df1 
@@ -2729,7 +2729,7 @@ def plot_props(soln, figdic, **kwargs):
     label_input=kwargs.get('label', '')
     layer_label = kwargs.get('layer_label', False)
     xoffset_input=kwargs.get('xoffset', 0)  
-    f_error = kwargs.get('f_error', [0.05, 15, 0])
+    f_error = kwargs.get('f_error', f_error_default)
     linewidth = kwargs.get('linewidth', 1)
     
     nplot = kwargs.get('nplot', [3,5])
@@ -3775,8 +3775,6 @@ def add_fstar_err(df, f_error):
         -uncertainty in f/n (applied individually to harmonics)
         
         -uncertaintiy in correlated f/n (not used here at this point]
-             
-        default is [0.05, 15, 0]
 
     Returns
     -------
