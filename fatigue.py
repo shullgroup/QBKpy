@@ -1074,6 +1074,7 @@ def read_cycles(filepath, skiprows=48, cycle_step=1,
         df.iloc[s:e].dropna().copy()
         for s, e in zip(df_cycles['start'], df_cycles['end'])
     ]
+    df_cycles['phi'] = np.nan
     return df_cycles
 
 
@@ -1114,25 +1115,48 @@ def add_tensile_stress_strain(df, h, l, b):
     df['stress'] = df['P'] / (l * b)
     return df
 
-def compute_phase_angle(load, disp):
+def calc_phi(x, y, plot=False, xmin = None, ymin = None,
+             xmax = None, ymax = None,
+             xlabel = 'x data', ylabel = 'y data'):
     #effective phase angle, normalized hysteresis energy approx
     #phi in degrees
-    if len(disp) < 10:
+    x = np.append(x, x[0])
+    y = np.append(y, y[0])
+    if len(x) < 10:
+        print('fewer than 10 data points')
         return np.nan
 
-    area = float(np.abs(np.trapezoid(load, disp)))
-    p0 = float(np.max(load) - np.min(load))
-    d0 = float(np.max(disp) - np.min(disp))
+    area = float(np.abs(np.trapezoid(y, x)))
+    if xmin == None:
+        xmin = np.min(x)
+    if ymin == None:
+        ymin = np.min(y)
+    if xmax == None:
+        xmax = np.max(x)
+    if ymax == None:
+        ymax = np.max(y)
+        
+    y0 = float(ymax - ymin)
+    x0 = float(xmax - xmin)
 
-    if p0 <= 0 or d0 <= 0:
+    if x0 <= 0 or y0 <= 0:
+        return print('calc_phi has x or y span less than zero')
         return np.nan
 
-    sin_phi = np.clip((4 * area) / (np.pi * p0 * d0), -1.0, 1.0)
+    sin_phi = np.clip((4 * area) / (np.pi * x0 * y0), -1.0, 1.0)
+    if plot:
+        fig_phi, ax_phi = plt.subplots(1,1, figsize = (4,3), constrained_layout = True)
+        ax_phi.plot(x, y, '+-')
+        ax_phi.plot([xmin, xmax], [ymin, ymax], 'o')
+        ax_phi.set_xlabel(xlabel)
+        ax_phi.set_ylabel(ylabel)
+        
     return float(np.degrees(np.arcsin(sin_phi)))
 
-def compute_initial_slope(df, xdata, ydata, y_range=[0.02, 0.1]):
+def find_initial_slope(df, xdata, ydata, y_min_frac=0.1, n=4,
+                       plot = False):
     """
-    Compute the initial slope of a dataset by fitting a straight line to
+    Find the initial slope of a dataset by fitting a straight line to
     points whose y-values fall within a specified fraction of the maximum
     y-value.
 
@@ -1162,15 +1186,26 @@ def compute_initial_slope(df, xdata, ydata, y_range=[0.02, 0.1]):
     If fewer than two data points fall within the specified range,
     the function returns `(np.nan, None, None)` and prints a warning.
     """
-    ymin, ymax = df[ydata].max() * np.array(y_range)
+    ymin = df[ydata].max() * y_min_frac
 
-    df_tmp = df[df[ydata].between(ymin, ymax)]
+    start_idx = df[df[ydata] >= ymin].index[0]
+    df_tmp = df.loc[start_idx:].head(n)
     if len(df_tmp) < 2:
-        print('less than 2 values in specified range (compute_initial_slope')
+        print('less than 2 values in specified range (c mpute_initial_slope')
         return np.nan, None
 
-    slope, intercept = np.polyfit(df_tmp[xdata], df_tmp[ydata], 1)
-    return float(slope), float(intercept)
+    m, b = np.polyfit(df_tmp[xdata], df_tmp[ydata], 1)
+    # plot the data (largely for debugging purposes)
+    if plot:
+        figfit, axfit = plt.subplots(1,1, figsize=(4, 3), 
+                                     constrained_layout = True)
+        axfit.plot(df[xdata], df[ydata], '+')
+        xfit = np.array([-b/m, (df[ydata].max()-b)/m])
+        yfit = m*xfit+b
+        axfit.plot(xfit, yfit, '-')
+        
+    
+    return m, b
 
 def loading_curve(strain, stress):
     #extract the stress and strain into loading only
@@ -1192,6 +1227,7 @@ def find_load_increase_displacement(d, p,
                                     smooth_window=None):
     """
     Find the displacement where load begins to increase.
+    NOTE:  NOT SURE THIS FUNCTION IS REALLY USEFUL
 
     Parameters
     ----------
