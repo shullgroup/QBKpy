@@ -11,6 +11,7 @@ from matplotlib import rcParams
 from pathlib import Path
 from openpyxl import load_workbook
 from scipy.interpolate import UnivariateSpline
+from scipy.interpolate import interp1d
 from scipy.signal import savgol_filter
 
 # Shared across the library
@@ -1194,3 +1195,86 @@ def remove_extreme_vals(df, var, delvar, columns):
 
     return df_tmp
 
+
+def fill_between(ax, df1, df2, x, y,
+                 alpha=0.3, color='C0',
+                 xmult=1, ymult=1):
+    """
+    Shade the region between two curves or between a curve and a constant
+    baseline.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        Axes on which to draw the filled region.
+    df1 : pandas.DataFrame
+        First dataframe containing the x and y data.
+    df2 : pandas.DataFrame or scalar
+        Second dataframe containing the x and y data, or a scalar value
+        representing a constant baseline.
+    x : str
+        Name of the x-data column.
+    y : str
+        Name of the y-data column.
+    alpha : float, optional
+        Transparency of the filled region.
+    color : str, optional
+        Fill color.
+    xmult : float, optional
+        Scale factor applied to x before plotting.
+    ymult : float, optional
+        Scale factor applied to y before plotting.
+
+    Notes
+    -----
+    Dataframes are sorted by x before interpolation. If df2 is a scalar,
+    the area between df1 and the constant baseline is filled directly.
+    If df2 is a dataframe, both curves are interpolated onto a common
+    x-grid spanning their overlapping x-range.
+    """
+
+    # Sort by x to ensure monotonic interpolation and filling
+    df1 = df1.sort_values(x)
+
+    # Fill to a constant baseline
+    if np.isscalar(df2):
+
+        ax.fill_between(
+            xmult * df1[x].to_numpy(),
+            ymult * df1[y].to_numpy(),
+            ymult * df2,
+            alpha=alpha,
+            color=color
+        )
+
+    # Fill between two dataframes
+    else:
+
+        df2 = df2.sort_values(x)
+
+        # Overlapping x range
+        xmin = max(df1[x].min(), df2[x].min())
+        xmax = min(df1[x].max(), df2[x].max())
+
+        # Common interpolation grid
+        x_common = np.linspace(xmin, xmax, 1000)
+
+        y1 = interp1d(
+            df1[x],
+            df1[y],
+            kind='linear'
+        )(x_common)
+
+        y2 = interp1d(
+            df2[x],
+            df2[y],
+            kind='linear'
+        )(x_common)
+
+        ax.fill_between(
+            xmult * x_common,
+            ymult * y1,
+            ymult * y2,
+            alpha=alpha,
+            color=color
+        )

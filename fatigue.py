@@ -17,7 +17,6 @@ from copy import deepcopy
 import utils
 import fracture
 import models
-from scipy.stats import linregress
 
 # a is the crack length
 # W is the sample width in the direction of crack propgation
@@ -598,7 +597,7 @@ def fatigue_plot_CT(df, **kwargs):
         # add colorbar
         sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
         sm._A = []
-        cb = plt.colorbar(sm, ax=ax[0], cmap=cmap, norm=norm, label='Cycle')
+        plt.colorbar(sm, ax=ax[0], cmap=cmap, norm=norm, label='Cycle')
     
         # crack length vs. cycles plot
         ax[1].plot(df['cycles'], df['a'], 'o')
@@ -1065,21 +1064,24 @@ def read_cycles(filepath, skiprows=48, cycle_step=1,
     n = len(gap)
  
     df_cycles = pd.DataFrame(
-        {'data': pd.Series([None] * n, dtype=object),
+        {'df_data': pd.Series([None] * n, dtype=object),
+         'df_tensile': pd.Series([None] * n, dtype=object),
          'start': start,
          'end':end},
         index=pd.Index(1+cycle_step*np.arange(n), name='cycle'))
     
-    df_cycles['data'] = [
+    df_cycles['df_data'] = [
         df.iloc[s:e].dropna().copy()
         for s, e in zip(df_cycles['start'], df_cycles['end'])
     ]
     df_cycles['phi'] = np.nan
+    df_cycles['max_stress'] = np.nan
+    df_cycles['K'] = np.nan
     return df_cycles
 
 
 #mechanical calcs functions
-def add_tensile_stress_strain(df, h, l, b):
+def add_stress_strain(df, h, l, b):
     """
     Add engineering strain and stress columns to a tensile test DataFrame.
 
@@ -1117,11 +1119,14 @@ def add_tensile_stress_strain(df, h, l, b):
 
 def calc_phi(x, y, plot=False, xmin = None, ymin = None,
              xmax = None, ymax = None,
-             xlabel = 'x data', ylabel = 'y data'):
+             xlabel = 'x data', ylabel = 'y data',
+             ax = None,
+             ymult = 1,
+             xmult = 1):
     #effective phase angle, normalized hysteresis energy approx
     #phi in degrees
-    x = np.append(x, x[0])
-    y = np.append(y, y[0])
+    # x = np.append(x, x[0])
+    # y = np.append(y, y[0])
     if len(x) < 10:
         print('fewer than 10 data points')
         return np.nan
@@ -1145,16 +1150,19 @@ def calc_phi(x, y, plot=False, xmin = None, ymin = None,
 
     sin_phi = np.clip((4 * area) / (np.pi * x0 * y0), -1.0, 1.0)
     if plot:
-        fig_phi, ax_phi = plt.subplots(1,1, figsize = (4,3), constrained_layout = True)
-        ax_phi.plot(x, y, '+-')
-        ax_phi.plot([xmin, xmax], [ymin, ymax], 'o')
-        ax_phi.set_xlabel(xlabel)
-        ax_phi.set_ylabel(ylabel)
+        if ax == None:
+            fig, ax = plt.subplots(1,1, figsize = (4,3), 
+                                           constrained_layout = True)
+        ax.plot(xmult*x, ymult*y, '+-')
+        ax.plot(xmult*np.array([xmin, xmax]),
+                ymult*np.array([ymin, ymax]), 'o')
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
         
     return float(np.degrees(np.arcsin(sin_phi)))
 
 def find_initial_slope(df, xdata, ydata, y_min_frac=0.1, n=4,
-                       plot = False):
+                       plot_slope = False):
     """
     Find the initial slope of a dataset by fitting a straight line to
     points whose y-values fall within a specified fraction of the maximum
@@ -1196,7 +1204,7 @@ def find_initial_slope(df, xdata, ydata, y_min_frac=0.1, n=4,
 
     m, b = np.polyfit(df_tmp[xdata], df_tmp[ydata], 1)
     # plot the data (largely for debugging purposes)
-    if plot:
+    if plot_slope:
         figfit, axfit = plt.subplots(1,1, figsize=(4, 3), 
                                      constrained_layout = True)
         axfit.plot(df[xdata], df[ydata], '+')
@@ -1207,10 +1215,105 @@ def find_initial_slope(df, xdata, ydata, y_min_frac=0.1, n=4,
     
     return m, b
 
-def loading_curve(strain, stress):
-    #extract the stress and strain into loading only
-    peak = int(np.argmax(strain))
-    return strain[:peak], stress[:peak]
+def load_unload(df, x):
+    """
+    Split a loading-unloading curve into loading and unloading segments.
+
+    The loading segment contains all rows from the start of the dataframe
+    through the row where column `x` reaches its maximum value. The unloading
+    segment contains the first row of the dataframe followed by all rows from
+    the maximum-value row to the end of the dataframe.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        DataFrame containing the loading-unloading data.
+    x : str
+        Name of the column used to identify the peak value that separates
+        loading and unloading.
+
+    Returns
+    -------
+    loading : pandas.DataFrame
+        Rows from the beginning of `df` through the peak value (inclusive).
+    unloading : pandas.DataFrame
+        First row of `df` followed by rows from the peak value through the
+        end of `df`.
+
+    Notes
+    -----
+    The peak is determined using ``np.argmax(df[x])``. If the maximum value
+    occurs multiple times, the first occurrence is used.
+    """
+    peak = int(np.argmax(df[x]))
+
+    loading = df.iloc[:peak+1]
+
+    if peak == 0:
+        unloading = df.iloc[peak:]
+    else:
+        unloading = pd.concat([df.iloc[[0]], df.iloc[peak:]])
+
+    return loading, unloading
+
+
+def process_cycles(df_in, fileinfo, cycles = 'all', add_tensile_df = True,
+                   y_min_frac = 0.05, n=3, plot_slope = False,
+                   plotted_cycles = [], ax=None,
+                   xmult = 1, ymult = 1):
+    df = df_in.copy()
+    if isinstance(cycles, str) and cycles == 'all':
+        cycles = df.index
+    for cycle in cycles:
+        df_data = add_stress_strain(
+            df.loc[cycle, 'df_data'], 
+            fileinfo['h'],
+            fileinfo['l'],
+            fileinfo['b'])
+        if add_tensile_df:
+            df_tensile = df_data.copy() 
+            df_fit, _ = load_unload(df_tensile, 'd') 
+            m, b = find_initial_slope(
+                df_fit, 'd', 'stress', y_min_frac=y_min_frac,
+                n=n, plot_slope = plot_slope)
+            if cycle in plotted_cycles:
+                if ax == None:
+                    fig, ax = plt.subplots(1,1, figsize=(4,3), 
+                                           constrained_layout = True)
+                ax.plot(df_tensile['d'], ymult*df_tensile['stress'], '+-', 
+                              label = f'{cycle}')
+            
+            # only use positive values of stress for calculation of hysteresis energy
+            df_tensile = df_tensile.query('d>-@b/@m and stress>0')
+            startrow = {
+                'd': -b/m,
+                'stress': 0
+            }
+            
+            first_idx = df_tensile.index[0] - 1
+            last_idx  = df_tensile.index[-1] + 1
+            
+            df_tensile = pd.concat([
+                pd.DataFrame([startrow], index=[first_idx]),
+                df_tensile,
+                pd.DataFrame([startrow], index=[last_idx])
+                ])
+
+            df.loc[cycle, 'phi'] = calc_phi(
+                df_tensile['d'], df_tensile['stress'],
+                plot = False,
+                ax = None,
+                ymult = 1e-6,
+                xmult = 1000,
+                xlabel = r'$\delta$ (mm)',
+                ylabel = 'stress (MPa)')
+            
+            df.at[cycle, 'df_tensile'] = df_tensile
+        df.at[cycle, 'df_data'] = df_data
+        df.at[cycle, 'max_stress'] = df_data['stress'].max()
+        df['K'] = df['max_stress'] / df.at[df.index.min(), 'max_stress']
+    return df.loc[cycles]
+
 
 def compute_tearing_energy(strain_load, stress_load, strain_unload, stress_unload, gauge):
     #compute all 3 energies (G, W_diss, W_in) in J/m^2
@@ -1220,224 +1323,3 @@ def compute_tearing_energy(strain_load, stress_load, strain_unload, stress_unloa
     G = float(np.trapezoid(stress_unload, strain_unload)) * conversion
     W_diss = W_in - G
     return W_in, G, W_diss
-
-
-def find_load_increase_displacement(d, p,
-                                    min_points=20,
-                                    smooth_window=None):
-    """
-    Find the displacement where load begins to increase.
-    NOTE:  NOT SURE THIS FUNCTION IS REALLY USEFUL
-
-    Parameters
-    ----------
-    d : array 
-        Displacement values
-    p : array
-        Load values
-    min_points : int
-        Minimum points allowed on each side of the change point.
-    smooth_window : int or None
-        Optional moving-average window applied to load before fitting.
-
-    Returns
-    -------
-    d_start : float
-        Estimated displacement where loading begins.
-    idx : int
-        Row index of the detected change point.
-    """
-
-    # Sort by displacement
-    order = np.argsort(d)
-    d = d[order]
-    p = p[order]
-
-    # Optional smoothing
-    if smooth_window and smooth_window > 1:
-        p = pd.Series(p).rolling(
-            smooth_window,
-            center=True,
-            min_periods=1
-        ).mean().to_numpy()
-
-    best_idx = None
-    best_sse = np.inf
-
-    n = len(d)
-
-    for i in range(min_points, n - min_points):
-
-        # Region 1: constant load
-        p1 = p[:i]
-        mean1 = np.mean(p1)
-        sse1 = np.sum((p1 - mean1) ** 2)
-
-        # Region 2: linear increase
-        d2 = d[i:]
-        p2 = p[i:]
-
-        slope, intercept, *_ = linregress(d2, p2)
-        fit2 = intercept + slope * d2
-        sse2 = np.sum((p2 - fit2) ** 2)
-
-        total_sse = sse1 + sse2
-
-        if total_sse < best_sse:
-            best_sse = total_sse
-            best_idx = i
-
-    return float(d[best_idx]), int(best_idx)
-
-
-def fit_neohookean(df, stress_range=[0.1, 0.9]):
-    """
-    Fit stress-strain data to the Neo-Hookean model
-
-        stress = G * (lambda - 1/lambda**2)
-
-    where
-
-        lambda = 1 + strain + offset
-
-    using only data with experimental stress between
-
-        stress_range[0] * max(stress)
-        stress_range[1] * max(stress)
-
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        DataFrame containing 'strain' and 'stress' columns.
-
-    stress_range : list, optional
-        Two-element list specifying the lower and upper bounds
-        of the fitting region as fractions of the maximum
-        experimental stress. For example, [0.1, 0.9] fits
-        data between 10% and 90% of the maximum stress.
-
-    Returns
-    -------
-    G : float
-        Fitted shear modulus.
-
-    offset : float
-        Fitted strain offset.
-
-    popt : ndarray
-        Fitted parameters [G, offset].
-
-    pcov : ndarray
-        Covariance matrix from curve_fit.
-
-    df_fit : pandas.DataFrame
-        Subset of the original dataframe used for fitting.
-    """
-
-    stress_max = df['stress'].max()
-
-    stress_min_fit = stress_range[0] * stress_max
-    stress_max_fit = stress_range[1] * stress_max
-
-    df_fit = df[
-        df['stress'].between(stress_min_fit, stress_max_fit)
-    ].copy()
-
-    def model(strain, G, offset):
-        lam = 1 + strain + offset
-        return G * (lam - 1 / lam**2)
-
-    x = df_fit['strain'].to_numpy()
-    y = df_fit['stress'].to_numpy()
-
-    popt, pcov = curve_fit(
-        model,
-        x,
-        y,
-        p0=[y.max(), 0.0],
-        bounds=([0.0, -0.1], [np.inf, 0.1])
-    )
-
-    G, offset = popt
-
-    return G, offset
-
-
-def fit_mooney_rivlin(df, stress_range=[0.1, 0.9]):
-    """
-    Fit stress-strain data to the incompressible uniaxial
-    Mooney-Rivlin model
-
-        stress = 2*(C1 + C2/lambda)*(lambda - 1/lambda**2)
-
-    where
-
-        lambda = 1 + strain + offset
-
-    using only data with experimental stress between
-
-        stress_range[0] * max(stress)
-        stress_range[1] * max(stress)
-
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        DataFrame containing 'strain' and 'stress' columns.
-
-    stress_range : list, optional
-        Two-element list specifying the lower and upper bounds
-        of the fitting region as fractions of the maximum
-        experimental stress.
-
-    Returns
-    -------
-    C1 : float
-        First Mooney-Rivlin parameter.
-
-    C2 : float
-        Second Mooney-Rivlin parameter.
-
-    offset : float
-        Fitted strain offset.
-
-    popt : ndarray
-        Fitted parameters [C1, C2, offset].
-
-    pcov : ndarray
-        Covariance matrix from curve_fit.
-
-    df_fit : pandas.DataFrame
-        Subset of the original dataframe used for fitting.
-    """
-
-    stress_max = df['stress'].max()
-
-    stress_min_fit = stress_range[0] * stress_max
-    stress_max_fit = stress_range[1] * stress_max
-
-    df_fit = df[
-        df['stress'].between(stress_min_fit, stress_max_fit)
-    ].copy()
-
-    def model(strain, C1, C2, offset):
-        lam = 1 + strain + offset
-        return (
-            2 * (C1 + C2 / lam)
-            * (lam - 1 / lam**2)
-        )
-
-    x = df_fit['strain'].to_numpy()
-    y = df_fit['stress'].to_numpy()
-
-    popt, pcov = curve_fit(
-        model,
-        x,
-        y,
-        p0=[0.5 * y.max(), 0.1 * y.max(), 0.0],
-        bounds=([0.0, 0.0, -0.1],
-                [np.inf, np.inf, 0.1])
-    )
-
-    C1, C2, offset = popt
-
-    return C1, C2, offset
