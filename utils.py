@@ -1278,3 +1278,34 @@ def fill_between(ax, df1, df2, x, y,
             alpha=alpha,
             color=color
         )
+        
+
+
+def interp_y(xdata, ydata, xval):
+    """
+    Return interpolated y value at x = xval.
+
+    Parameters
+    ----------
+    xdata : array-like
+        x values.
+    ydata : array-like
+        y values.
+    xval : float or array-like
+        x location(s) where interpolation is desired.
+
+    Returns
+    -------
+    yval : float or ndarray
+        Interpolated y value(s).
+    """
+
+    x = np.asarray(xdata)
+    y = np.asarray(ydata)
+
+    # Ensure x is sorted
+    order = np.argsort(x)
+    x = x[order]
+    y = y[order]
+
+    return np.interp(xval, x, y)

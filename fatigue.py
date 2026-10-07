@@ -7,6 +7,7 @@ import sys
 import os
 from scipy.optimize import curve_fit
 from scipy.integrate import cumulative_trapezoid
+from scipy.interpolate import UnivariateSpline
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from scipy.signal import find_peaks
@@ -1077,6 +1078,9 @@ def read_cycles(filepath, skiprows=48, cycle_step=1,
     df_cycles['phi'] = np.nan
     df_cycles['max_stress'] = np.nan
     df_cycles['K'] = np.nan
+    df_cycles['modulus'] =  np.nan
+    df_cycles['strain_0'] = np.nan
+    df_cycles['K'] = np.nan
     return df_cycles
 
 
@@ -1161,7 +1165,7 @@ def calc_phi(x, y, plot=False, xmin = None, ymin = None,
         
     return float(np.degrees(np.arcsin(sin_phi)))
 
-def find_initial_slope(df, xdata, ydata, y_min_frac=0.1, n=4,
+def find_initial_slope_old(df, xdata, ydata, y_min_frac=0.1, n=4,
                        plot_slope = False):
     """
     Find the initial slope of a dataset by fitting a straight line to
@@ -1214,6 +1218,83 @@ def find_initial_slope(df, xdata, ydata, y_min_frac=0.1, n=4,
         
     
     return m, b
+
+
+
+def find_initial_slope(df, xdata, ydata, y_min_frac=0.1, n=4,
+                       plot_slope=False):
+    """
+    Find the initial slope of a dataset by fitting a straight line to
+    the first n points whose y-values exceed a specified fraction of
+    the maximum y-value.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        DataFrame containing the data.
+    xdata : str
+        Name of the column containing x-values.
+    ydata : str
+        Name of the column containing y-values.
+    y_min_frac : float, optional
+        Fraction of the maximum y-value used to determine the start
+        of the fit region.
+    n : int, optional
+        Number of points to use in the fit.
+    plot_slope : bool, optional
+        If True, plot the data and fitted line.
+
+    Returns
+    -------
+    m : float
+        Slope of the fit.
+    b : float
+        Intercept of the fit.
+    """
+
+    # Sort by x-value so that "initial" means smallest x
+    df_sorted = df.sort_values(xdata).reset_index(drop=True)
+
+    ymin = df_sorted[ydata].max() * y_min_frac
+
+    mask = df_sorted[ydata] >= ymin
+
+    if not mask.any():
+        print('No values found above y_min_frac threshold.')
+        return np.nan, None
+
+    start_pos = mask.idxmax()
+
+    df_tmp = df_sorted.iloc[start_pos:start_pos + n]
+
+    if len(df_tmp) < 2:
+        print('less than 2 values in specified range (compute_initial_slope)')
+        return np.nan, None
+
+    m, b = np.polyfit(df_tmp[xdata], df_tmp[ydata], 1)
+
+    # plot the data (largely for debugging purposes)
+    if plot_slope:
+        figfit, axfit = plt.subplots(
+            1, 1,
+            figsize=(4, 3),
+            constrained_layout=True
+        )
+
+        axfit.plot(df_sorted[xdata], df_sorted[ydata], '+', label='data')
+
+        xfit = np.array([
+            -b / m,
+            (df_sorted[ydata].max() - b) / m
+        ])
+
+        yfit = m * xfit + b
+
+        axfit.plot(xfit, yfit, '-', label='fit')
+        axfit.legend()
+
+    return m, b
+
 
 def load_unload(df, x):
     """
@@ -1272,10 +1353,18 @@ def process_cycles(df_in, fileinfo, cycles = 'all', add_tensile_df = True,
             fileinfo['b'])
         if add_tensile_df:
             df_tensile = df_data.copy() 
-            df_fit, _ = load_unload(df_tensile, 'd') 
-            m, b = find_initial_slope(
-                df_fit, 'd', 'stress', y_min_frac=y_min_frac,
+            df_load, df_unload = load_unload(df_tensile, 'd') 
+            
+            # find slope and intercept for loading curve
+            ml, bl = find_initial_slope(
+                df_load, 'strain', 'stress', y_min_frac=y_min_frac,
                 n=n, plot_slope = plot_slope)
+            
+            # find slope and intercept for unloading curve
+            mu, bu = find_initial_slope(
+                df_unload, 'strain', 'stress', y_min_frac=y_min_frac,
+                n=n, plot_slope = plot_slope)
+            
             if cycle in plotted_cycles:
                 if ax == None:
                     fig, ax = plt.subplots(1,1, figsize=(4,3), 
@@ -1284,19 +1373,26 @@ def process_cycles(df_in, fileinfo, cycles = 'all', add_tensile_df = True,
                               label = f'{cycle}')
             
             # only use positive values of stress for calculation of hysteresis energy
-            df_tensile = df_tensile.query('d>-@b/@m and stress>0')
+            df_tensile = df_tensile.query('strain>-@bl/@ml and stress>0')
             startrow = {
-                'd': -b/m,
-                'stress': 0
+                'd': -fileinfo['h']*bl/ml,
+                'stress': 0,
+                'strain':-bl/ml
             }
             
+            endrow = {
+                'd': -fileinfo['h']*bu/mu,
+                'stress': 0,
+                'strain':-bu/mu
+            }
+                        
             first_idx = df_tensile.index[0] - 1
             last_idx  = df_tensile.index[-1] + 1
             
             df_tensile = pd.concat([
                 pd.DataFrame([startrow], index=[first_idx]),
                 df_tensile,
-                pd.DataFrame([startrow], index=[last_idx])
+                pd.DataFrame([endrow], index=[last_idx])
                 ])
 
             df.loc[cycle, 'phi'] = calc_phi(
@@ -1309,9 +1405,10 @@ def process_cycles(df_in, fileinfo, cycles = 'all', add_tensile_df = True,
                 ylabel = 'stress (MPa)')
             
             df.at[cycle, 'df_tensile'] = df_tensile
+            df.at[cycle, 'modulus'] = ml
+            df.at[cycle, 'strain_0'] = -bl/ml
         df.at[cycle, 'df_data'] = df_data
         df.at[cycle, 'max_stress'] = df_data['stress'].max()
-        df['K'] = df['max_stress'] / df.at[df.index.min(), 'max_stress']
     return df.loc[cycles]
 
 
@@ -1323,3 +1420,73 @@ def compute_tearing_energy(strain_load, stress_load, strain_unload, stress_unloa
     G = float(np.trapezoid(stress_unload, strain_unload)) * conversion
     W_diss = W_in - G
     return W_in, G, W_diss
+
+
+def cumulative_integral_spline(
+    xdata,
+    ydata,
+    plot=True,
+    spline_s=0,
+    spline_k=3,
+):
+    """
+    Fit a spline to y(x) and return both the spline and a callable
+    cumulative integral.
+
+    Parameters
+    ----------
+    xdata : array-like
+        x values.
+    ydata : array-like
+        y values.
+    plot : bool, optional
+        If True (default), plot the data and spline fit.
+    spline_s : float, optional
+        Smoothing factor passed to UnivariateSpline.
+    spline_k : int, optional
+        Spline order (default 3 = cubic).
+
+    Returns
+    -------
+    spline : UnivariateSpline
+        Spline fit to y(x).
+    F : callable
+        Function F(x) = integral of y dx from xmin to x.
+    """
+
+    # Convert inputs to numpy arrays
+    x = np.asarray(xdata)
+    y = np.asarray(ydata)
+
+    # Sort by x
+    order = np.argsort(x)
+    x = x[order]
+    y = y[order]
+
+    # Fit spline
+    spline = UnivariateSpline(x, y, s=spline_s, k=spline_k)
+
+    # Antiderivative spline
+    spline_int = spline.antiderivative()
+
+    xmin = x.min()
+    offset = spline_int(xmin)
+
+    def Fint(x_eval):
+        """Cumulative integral from xmin to x_eval."""
+        return spline_int(x_eval) - offset
+
+    if plot:
+        fig, ax = plt.subplots()
+
+        xfit = np.linspace(x.min(), x.max(), 1000)
+        yfit = spline(xfit)
+
+        ax.plot(x, y, "o", label="data")
+        ax.plot(xfit, yfit, "-", label="spline")
+
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
+        ax.legend()
+
+    return spline, Fint
