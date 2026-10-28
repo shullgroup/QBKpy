@@ -1,75 +1,84 @@
 # %%
-import glob
-from test.util_test.fileManager import *
-import logging.config
-# Get the logger specified in the file
+from pathlib import Path
+import logging
+import tomllib
+
+from fileManager import (
+    get_file_encoding,
+    get_text_delimiter,
+    get_file_config,
+    read_csv_with_config,
+    transform_df_to_si,
+    read_csv_to_si,
+    load_standards_registry,
+)
+
+# Configure centralized logger for testing
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)  # Set the logging level to for output to console
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] [%(levelname)s] [%(filename)s:%(lineno)d] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
 
 # %%
-
-
-files = [
-    "./test_data/BGPDS50-DTDA-1_kic.CSV",  # Ta-electroforce
-    #     './test_data/BGPDS50-DTDA50_cure_060225.txt',
-    #     './test_data/BGPDS50-DTDA-1_dma.txt',
-    #     './test_data/BGPDS-DTDA-1_compression.txt',
-    #     './test_data/dgeba-mda-6_mdsc.txt',
-    #     './test_data/BGPDS50-DTDA50_190C_060225_rheo.csv',   # anton-paar
+# Define test files and matching registry names
+files_and_registries = [
+    ("./test_data/BGPDS50-DTDA-1_kic.CSV", "ta-instruments_mechanics"),
+    # ("./test_data/BGPDS50-DTDA50_190C_060225_rheo.csv", "anton-paar_rheology"),
 ]
-registry_name = "TA_electroforce"
-# registry_name = 'anton-paar_rhometer'
 
-for file in files:
-    logger.info("=====================")
-    logger.info(f"file: {file}")
-    # get encoding
-    encoding = get_file_encoding(file)
-    logger.info(f"encoding = {encoding}")
+for file_path, registry_name in files_and_registries:
+    path = Path(file_path)
+    if not path.is_file():
+        logger.warning(f"Skipping missing test file: {file_path}")
+        continue
 
-    # get delimeter
-    with open(file, "r", encoding=encoding, errors="ignore") as f:
+    logger.info("=" * 60)
+    logger.info(f"Processing File: {path.name} | Registry: {registry_name}")
+    
+    # 1. Inspect low-level file parameters
+    encoding = get_file_encoding(path)
+    logger.info(f"Detected Encoding: {encoding}")
+
+    with open(path, "r", encoding=encoding, errors="ignore") as f:
         lines = f.readlines()
 
     delim = get_text_delimiter(lines)
-    logger.info(f"delim  = {delim}")
+    logger.info(f"Detected Delimiter: {repr(delim)}")
 
-    # get config with minimum information
-    config = get_file_config(
-        file, registry_name
-    )  # using the function from previous response
-    logger.info(f"config = {config}")
+    # 2. Extract configuration
+    config = get_file_config(path, registry_name)
+    logger.info(f"Extracted CSV Config: {config}")
 
-    # read raw csv
-    raw_df = read_csv_with_config(file, config)
-    logger.info(f"raw_df head")
-    logger.info(raw_df.head())
+    # 3. Read raw DataFrame
+    raw_df = read_csv_with_config(path, config)
+    logger.info("Raw DataFrame Head:")
+    logger.info("\n" + str(raw_df.head()))
 
-    # transfer to si unit
+    # 4. Transform DataFrame to SI units
     si_df = transform_df_to_si(raw_df, registry_name)
-    logger.info(f"si_df head")
-    logger.info(si_df.head())
+    logger.info("Transformed SI DataFrame Head:")
+    logger.info("\n" + str(si_df.head()))
 
-    # function in one with minimum information
-    df = read_csv_to_si(file, registry_name)
+    # 5. One-step reader verification
+    df_direct = read_csv_to_si(path, registry_name)
+    logger.info(f"Direct Reader Output Shape: {df_direct.shape}")
 
 
 # %%
-import tomllib
+# Verify and print standard target variables from standards.toml
+logger.info("=" * 60)
+logger.info("LOADING STANDARDS REGISTRY")
 
-# 1. Read and parse the TOML file
-with open("./registries/standards.toml", "rb") as f:
-    data = tomllib.load(f)
+standards_data = load_standards_registry()
 
-# 2. Dynamically print every category, variable, and key-value pair
-for category, variables in data.items():
+for category, variables in standards_data.items():
     print(f"\n=== {category.upper()} ===")
     for var_name, metadata in variables.items():
         print(f"  [{var_name}]")
         for key, val in metadata.items():
-                        # Strips the $ sign if present for cleaner console viewing
-            clean_val = str(val).strip("$") if isinstance(val, str) else val
+            clean_val = str(val).strip("$").replace("\\\\", "\\") if isinstance(val, str) else val
             print(f"    {key:<15} : {clean_val}")
+
 # %%
-
-

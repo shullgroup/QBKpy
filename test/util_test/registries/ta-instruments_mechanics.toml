@@ -1,170 +1,196 @@
-# =============================================================================
-# TA - Eletroforce
-# =============================================================================
+# ##########################################################
+# TA Instruments / ElectroForce Data Standardization Mapping
+# ##########################################################
 
-["Points"]
+[file]
+test_method        = "dma"           # Matches [dma] section in standards.toml
+encoding           = ""              # Autodetected if empty
+delim              = ""              # Autodetected if empty
+decimal_sep        = "."
+name_use           = "standard_name" # Options: "standard_name", "short_name", "raw_name"
+
+# 1. Component Sequence
+structure_sequence = ["info", "header", "unit", "data"]
+
+# 2. Component Details
+unit_placement     = "separate_row" # Units on line 2 (e.g., "Sec", "mm", "N")
+info_prefix        = "#"            # Preamble header lines start with '#'
+
+# 3. Multi-Segment Hints (Optional for single-run files)
+[file_hints.segments]
+multi_segs         = false
+seg_start          = ""
+seg_end            = ""
+segment_sequence   = ["info", "header", "unit", "data"]
+
+
+# ##########################################################
+# VARIABLES MAPPING TABLE
+# ##########################################################
+
+[[vars]]
 raw_name      = "Points"
 raw_unit      = ""
 standard_name = "points"
 short_name    = "points"
 si_unit       = ""
 
-["Elapsed Time Sec"]
+[[vars]]
 raw_name      = "Elapsed Time"
 raw_unit      = "Sec"
 standard_name = "time"
 short_name    = "time"
 si_unit       = "s"
 
-["Scan Time Sec"]
+[[vars]]
 raw_name      = "Scan Time"
 raw_unit      = "Sec"
 standard_name = "scan_time"
 short_name    = "scan_time"
 si_unit       = "s"
 
-["Disp mm"]
+[[vars]]
 raw_name      = "Disp"
 raw_unit      = "mm"
 standard_name = "displacement"
 short_name    = "disp"
 si_unit       = "m"
-convert_expr = "x * 1e-3"
+convert_expr  = "x * 1e-3"
 
-["Load N"]
+[[vars]]
 raw_name      = "Load"
 raw_unit      = "N"
 standard_name = "load"
 short_name    = "P"
 si_unit       = "N"
 
-["Torque Nm"]
+[[vars]]
 raw_name      = "Torque"
 raw_unit      = "Nm"
 standard_name = "torque"
 short_name    = "torque"
 si_unit       = "Nm"
 
-["Ch 4 V"]
+[[vars]]
 raw_name      = "Ch 4"
 raw_unit      = "V"
 standard_name = "channel_4_voltage"
 short_name    = "ch4"
 si_unit       = "V"
 
-["Rotation deg"]
+[[vars]]
 raw_name      = "Rotation"
 raw_unit      = "deg"
 standard_name = "rotation_angle"
 short_name    = "rot"
 si_unit       = "rad"
-convert_expr = "x * (np.pi / 180.0)"
+convert_expr  = "x * (np.pi / 180.0)"
 
-["T1 Control C"]
+[[vars]]
 raw_name      = "T1 Control"
 raw_unit      = "C"
-standard_name = "control_temperature_1"
-short_name    = "t1_ctrl"
+standard_name = "control_temperature"
+short_name    = "temp_ctrl"
 si_unit       = "K"
-convert_expr = "x + 273.15"
+convert_expr  = "x + 273.15"
 
-["T2 Chamber C"]
+[[vars]]
 raw_name      = "T2 Chamber"
 raw_unit      = "C"
-standard_name = "chamber_temperature_2"
-short_name    = "t2_chamb"
+standard_name = "chamber_temperature"
+short_name    = "temp_chamb"
 si_unit       = "K"
-convert_expr = "x + 273.15"
+convert_expr  = "x + 273.15"
 
-["DirCmd A V"]
+[[vars]]
 raw_name      = "DirCmd A"
 raw_unit      = "V"
 standard_name = "direct_command_a"
 short_name    = "dircmd_a"
 si_unit       = "V"
 
-["DirCmd T V"]
+[[vars]]
 raw_name      = "DirCmd T"
 raw_unit      = "V"
 standard_name = "direct_command_t"
 short_name    = "dircmd_t"
 si_unit       = "V"
 
-["UserCalc1 V"]
+[[vars]]
 raw_name      = "UserCalc1"
 raw_unit      = "V"
 standard_name = "user_calculation_1"
 short_name    = "user_calc1"
 si_unit       = "V"
 
-["Axial cmd mm"]
+[[vars]]
 raw_name      = "Axial cmd"
 raw_unit      = "mm"
 standard_name = "axial_command"
 short_name    = "ax_cmd"
 si_unit       = "m"
-convert_expr = "x * 1e-3"
+convert_expr  = "x * 1e-3"
 
-["Axial err %"]
+[[vars]]
 raw_name      = "Axial err"
 raw_unit      = "%"
 standard_name = "axial_error_percentage"
 short_name    = "ax_err"
 si_unit       = ""
-convert_expr = "x * 0.01"
+convert_expr  = "x * 0.01"
 
-["Axial drv %"]
+[[vars]]
 raw_name      = "Axial drv"
 raw_unit      = "%"
 standard_name = "axial_drive_percentage"
 short_name    = "ax_drv"
 si_unit       = ""
-convert_expr = "x * 0.01"
+convert_expr  = "x * 0.01"
 
-["Torsion cmd deg"]
+[[vars]]
 raw_name      = "Torsion cmd"
 raw_unit      = "deg"
 standard_name = "torsion_command"
 short_name    = "tor_cmd"
 si_unit       = "rad"
-convert_expr = "x * (np.pi / 180.0)"
+convert_expr  = "x * (np.pi / 180.0)"
 
-["Torsion err %"]
+[[vars]]
 raw_name      = "Torsion err"
 raw_unit      = "%"
 standard_name = "torsion_error_percentage"
 short_name    = "tor_err"
 si_unit       = ""
-convert_expr = "x * 0.01"
+convert_expr  = "x * 0.01"
 
-["Torsion drv %"]
+[[vars]]
 raw_name      = "Torsion drv"
 raw_unit      = "%"
 standard_name = "torsion_drive_percentage"
 short_name    = "tor_drv"
 si_unit       = ""
-convert_expr = "x * 0.01"
+convert_expr  = "x * 0.01"
 
-["Temp cmd C"]
+[[vars]]
 raw_name      = "Temp cmd"
 raw_unit      = "C"
 standard_name = "temperature_command"
 short_name    = "temp_cmd"
 si_unit       = "K"
-convert_expr = "x + 273.15"
+convert_expr  = "x + 273.15"
 
-["Temp err %"]
+[[vars]]
 raw_name      = "Temp err"
 raw_unit      = "%"
 standard_name = "temperature_error_percentage"
 short_name    = "temp_err"
 si_unit       = ""
-convert_expr = "x * 0.01"
+convert_expr  = "x * 0.01"
 
-["Temp drv %"]
+[[vars]]
 raw_name      = "Temp drv"
 raw_unit      = "%"
 standard_name = "temperature_drive_percentage"
 short_name    = "temp_drv"
 si_unit       = ""
-convert_expr = "x * 0.01"
+convert_expr  = "x * 0.01"

@@ -12,19 +12,32 @@
 ### file structure hints for data detection ###
 # this part is optional. it can be autodetected and defined in functions.
 
-[file_hints]
-encoding            = ""
-delim               = ""
-with_header         = "True"  # True or False
-with_unit           = "True"  # True or False
-name_use            = "standard_name" # keys in vars
-multi_segs          = "" # Ture or False
-seg_start           = "" # start line of segments e.g.: "[step]"
-seg_end             = "" # end line of segments. "" is empty line(s)
-with_seg_info_lines = "True" # True or False
-with_seg_header     = "True" # True or False
-with_seg_unit       = "True" # True or False
+[file]
+# if value is left as "", the code will try to find
 
+# test method 
+test_method         = "rheology"   # rheology, DMA, TGA, DSC, QCM etc (can be found in standards.toml)
+encoding            = ""   
+delim               = ""
+decimal_sep         = "."                # Decimal separator ("." or ",")
+name_use            = "standard_name" # keys in vars "standard_name", "short_name" "raw_name"
+
+# 1. Component Sequence
+# Defines the order in which blocks appear in the file or per segment
+# Supported block types: "info", "header", "unit", "data"
+structure_sequence   = ["info", "header", "unit", "data"]
+
+# 2. Component Details
+unit_placement       = "separate_row" # Options: "separate_row", "in_header" (e.g. "Time [s]")
+info_prefix          = "#"            # Character prefix for info/comment lines if marked (optional)
+
+# 3. Multi-Segment Hints
+[file_hints.segments]
+multi_segs          = true
+seg_start           = "[step]"     # Trigger substring or regex for section boundary
+seg_end             = ""           # End marker ("" means blank line)
+# Sequence within each segment if different from global structure_sequence
+segment_sequence    = ["info", "header", "unit", "data"]
 
 
 ### variables information ###
