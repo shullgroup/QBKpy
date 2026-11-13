@@ -3056,6 +3056,36 @@ def plot_props(soln, figdic, **kwargs):
     return figdic['fig']['master'], figdic['ax']
     
 
+def read_qcm_sheet(infile, sheet, index_col='auto'):
+    """
+    Read one sheet of a RheoQCM .xlsx file with a consistent index.
+
+    args:
+    ---------------------
+    infile : String
+        The .xlsx file.
+    sheet : String
+        Sheet name, e.g. 'S_channel' or 'R_channel'.
+    index_col : 'auto', integer or None
+        'auto' (default) uses the queue_id column as the index if it
+        exists and 0...N-1 otherwise, dropping the unnamed row-number
+        column written by pandas.  An integer or None is passed to
+        pd.read_excel unchanged.
+
+    returns:
+        Dataframe for the sheet.
+    """
+    if index_col != 'auto':
+        return pd.read_excel(infile, sheet_name=sheet, header=0,
+                             index_col=index_col)
+    df = pd.read_excel(infile, sheet_name=sheet, header=0)
+    if len(df.columns) and str(df.columns[0]).startswith('Unnamed'):
+        df = df.iloc[:, 1:]
+    if 'queue_id' in df.columns:
+        df = df.set_index('queue_id')
+    return df
+
+
 def read_xlsx(infile, **kwargs):
     """
     Create dataframe from input .xlsx file.
@@ -3091,16 +3121,18 @@ def read_xlsx(infile, **kwargs):
 
 
     ref_idx : integer, list or numpy array of integers, or string
-        Index values to include in reference determination.
-            
+        Index values to include in reference determination.  Index
+        values are queue_id values if the sheet has a queue_id column,
+        and row numbers starting at 0 otherwise (see index_col).
+
             - default is 'all', which takes everything
             - 'max' means we take the single value for which f3 is maximized
             - 'last' means the last index (highest value)
             - 'first' means we take only the first index (lowest value)
 
-    film_idx: numpy array of integers or string
-        Index values to include for film data.  Default is 'all' which 
-        takes everthing.
+    film_idx: integer, list or numpy array of integers, or string
+        Index values to include for film data, defined the same way as
+        for ref_idx.  Default is 'all' which takes everthing.
 
     T_coef : dictionary or string
         Temperature coefficients for reference temp. shift  
@@ -3142,9 +3174,11 @@ def read_xlsx(infile, **kwargs):
     nvals : list of integers 
         Harmonics to include.  Default is [1, 3, 5, 7, 9].
         
-    index_col : integer
-        Column in Excel spreadsheet to use for the dataframe index.
-        Default is 0.  Use None to make a new index.
+    index_col : 'auto', integer or None
+        How the film and reference sheets are indexed.  Default 'auto'
+        uses queue_id if the sheet has that column and 0...N-1
+        otherwise.  An integer uses that spreadsheet column, and None
+        makes a new 0...N-1 index.  Applies to both sheets.
     
        
     overlayer : dictionary
@@ -3168,7 +3202,7 @@ def read_xlsx(infile, **kwargs):
     Tref_in=kwargs.get('Tref', None)
     Tref=22 if Tref_in is None else Tref_in
     autodelete = kwargs.get('autodelete', True)
-    index_col = kwargs.get('index_col', 0)
+    index_col = kwargs.get('index_col', 'auto')
     
    
     # specify default bare crystal temperature coefficients
@@ -3187,19 +3221,13 @@ def read_xlsx(infile, **kwargs):
     # allow a single index value as well as a list or array
     if type(ref_idx) != str:
         ref_idx = np.atleast_1d(ref_idx)
+    if type(film_idx) != str:
+        film_idx = np.atleast_1d(film_idx)
 
-    if type(ref_idx)==str and ref_idx == 'max':
-        df_ref=pd.read_excel(infile, sheet_name=ref_channel, header=0)
-        ref_idx = [df_ref['f3'].idxmax()]
-    elif type(ref_idx)== str and ref_idx == 'first':
-        df_ref=pd.read_excel(infile, sheet_name=ref_channel, header=0)
-        ref_idx = [df_ref.index[0]]
-    elif type(ref_idx)==str and ref_idx == 'last':
-        df_ref=pd.read_excel(infile, sheet_name=ref_channel, header=0)
-        ref_idx = [df_ref.index[-1]]
-        
-    df=pd.read_excel(infile, sheet_name=film_channel, header=0,
-                     index_col = index_col)
+    # film and reference sheets are indexed the same way (queue_id if
+    # present, otherwise 0...N-1), so film_idx and ref_idx both refer
+    # to the same labels
+    df=read_qcm_sheet(infile, film_channel, index_col=index_col)
     if type(film_idx) != str:
         df=df[df.index.isin(film_idx)]
         
@@ -3257,9 +3285,15 @@ def read_xlsx(infile, **kwargs):
     
     else:
         # read the reference data
-        df_ref=pd.read_excel(infile, sheet_name=ref_channel, header=0)
+        df_ref=read_qcm_sheet(infile, ref_channel, index_col=index_col)
+        if type(ref_idx)==str and ref_idx == 'max':
+            ref_idx = [df_ref['f3'].idxmax()]
+        elif type(ref_idx)==str and ref_idx == 'first':
+            ref_idx = [df_ref.index[0]]
+        elif type(ref_idx)==str and ref_idx == 'last':
+            ref_idx = [df_ref.index[-1]]
         if type(ref_idx) != str:
-            df_ref=df_ref[df_ref.index.isin(ref_idx)]  
+            df_ref=df_ref[df_ref.index.isin(ref_idx)]
             
         if ('temp' not in df_ref.keys()) or (df_ref.temp.isnull().values.all()):
             df_ref['temp'] = Tref
