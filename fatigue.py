@@ -1081,6 +1081,7 @@ def read_cycles(filepath, skiprows=48, cycle_step=1,
     df_cycles['modulus'] =  np.nan
     df_cycles['strain_0'] = np.nan
     df_cycles['K'] = np.nan
+    df_cycles['a'] = 0
     return df_cycles
 
 
@@ -1422,53 +1423,53 @@ def compute_tearing_energy(strain_load, stress_load, strain_unload, stress_unloa
     return W_in, G, W_diss
 
 
-def cumulative_integral_spline(
+
+def cumulative_integral_spline_old(
     xdata,
     ydata,
     plot=True,
-    spline_s=0,
+    sigma=None,
     spline_k=3,
 ):
     """
-    Fit a spline to y(x) and return both the spline and a callable
-    cumulative integral.
+    Fit a smoothing spline to noisy y(x) and return the spline and a
+    callable cumulative integral. Both extrapolate smoothly outside the
+    data range, so keep extrapolation to a small distance.
 
     Parameters
     ----------
-    xdata : array-like
-        x values.
-    ydata : array-like
-        y values.
+    xdata, ydata : array-like
+        Data (x need not be pre-sorted; duplicate x values are not allowed).
     plot : bool, optional
         If True (default), plot the data and spline fit.
-    spline_s : float, optional
-        Smoothing factor passed to UnivariateSpline.
+    sigma : float, optional
+        Estimated noise standard deviation on y. If None, it is estimated
+        from second differences of the data.
     spline_k : int, optional
         Spline order (default 3 = cubic).
 
     Returns
     -------
     spline : UnivariateSpline
-        Spline fit to y(x).
-    F : callable
-        Function F(x) = integral of y dx from xmin to x.
+    Fint : callable
+        F(x) = integral of y dx from xmin to x.
     """
+    x = np.asarray(xdata, dtype=float)
+    y = np.asarray(ydata, dtype=float)
 
-    # Convert inputs to numpy arrays
-    x = np.asarray(xdata)
-    y = np.asarray(ydata)
-
-    # Sort by x
     order = np.argsort(x)
     x = x[order]
     y = y[order]
 
-    # Fit spline
-    spline = UnivariateSpline(x, y, s=spline_s, k=spline_k)
+    # Estimate noise level if not given. Second differences cancel a smooth
+    # trend, leaving mostly noise (assumes roughly even x spacing).
+    if sigma is None:
+        sigma = np.std(np.diff(y, 2)) / np.sqrt(6)
 
-    # Antiderivative spline
+    s = len(x) * sigma**2
+    spline = UnivariateSpline(x, y, s=s, k=spline_k, ext=0)  # ext=0: extrapolate
+
     spline_int = spline.antiderivative()
-
     xmin = x.min()
     offset = spline_int(xmin)
 
@@ -1478,15 +1479,305 @@ def cumulative_integral_spline(
 
     if plot:
         fig, ax = plt.subplots()
-
-        xfit = np.linspace(x.min(), x.max(), 1000)
-        yfit = spline(xfit)
-
+        pad = 0.05 * (x.max() - x.min())
+        xfit = np.linspace(x.min() - pad, x.max() + pad, 1000)
         ax.plot(x, y, "o", label="data")
-        ax.plot(xfit, yfit, "-", label="spline")
-
+        ax.plot(xfit, spline(xfit), "-", label=f"spline (s={s:.3g})")
+        ax.axvspan(x.min() - pad, x.min(), color="gray", alpha=0.15)
+        ax.axvspan(x.max(), x.max() + pad, color="gray", alpha=0.15,
+                   label="extrapolated")
         ax.set_xlabel("x")
         ax.set_ylabel("y")
         ax.legend()
+
+    return spline, Fint
+
+
+from scipy.interpolate import BSpline
+from scipy.optimize import lsq_linear
+
+
+def cumulative_integral_spline_bak2(
+    xdata,
+    ydata,
+    plot=True,
+    n_knots=6,
+    lam=0.0,
+    spline_k=3,
+):
+    """
+    Fit a monotonically increasing smoothing spline to noisy y(x) and
+    return the spline and a callable cumulative integral.
+
+    Parameters
+    ----------
+    xdata, ydata : array-like
+        Data (x need not be pre-sorted; duplicate x values are allowed).
+    plot : bool, optional
+        If True (default), plot the data and spline fit.
+    n_knots : int, optional
+        Number of interior knots. Fewer knots = smoother fit.
+    lam : float, optional
+        Optional roughness penalty on the coefficients (second differences).
+        Increase for a smoother curve; 0 means no penalty.
+    spline_k : int, optional
+        Spline order (default 3 = cubic).
+
+    Returns
+    -------
+    spline : BSpline
+    Fint : callable
+        F(x) = integral of y dx from xmin to x.
+    """
+    x = np.asarray(xdata, dtype=float)
+    y = np.asarray(ydata, dtype=float)
+
+    order = np.argsort(x)
+    x = x[order]
+    y = y[order]
+    xmin, xmax = x.min(), x.max()
+
+    # Clamped knot vector with interior knots at data quantiles
+    interior = np.quantile(x, np.linspace(0, 1, n_knots + 2)[1:-1])
+    t = np.r_[[xmin] * (spline_k + 1), interior, [xmax] * (spline_k + 1)]
+    n_coef = len(t) - spline_k - 1
+
+    # Design matrix: B[i, j] = j-th basis function evaluated at x[i]
+    B = BSpline.design_matrix(x, t, spline_k).toarray()
+
+    # Reparameterize coefficients: c = L @ p, with p[0] free and p[1:] >= 0.
+    # Then c is non-decreasing, which guarantees a non-decreasing spline.
+    L = np.tril(np.ones((n_coef, n_coef)))
+    A = B @ L
+    rhs = y
+
+    if lam > 0:
+        D2 = np.diff(np.eye(n_coef), 2, axis=0)   # second-difference operator
+        A = np.vstack([A, np.sqrt(lam) * (D2 @ L)])
+        rhs = np.r_[y, np.zeros(D2.shape[0])]
+
+    lb = np.r_[-np.inf, np.zeros(n_coef - 1)]
+    ub = np.full(n_coef, np.inf)
+    res = lsq_linear(A, rhs, bounds=(lb, ub))
+
+    c = L @ res.x
+    spline = BSpline(t, c, spline_k, extrapolate=True)
+
+    spline_int = spline.antiderivative()
+    offset = spline_int(xmin)
+
+    def Fint(x_eval):
+        """Cumulative integral from xmin to x_eval."""
+        return spline_int(x_eval) - offset
+
+    if plot:
+        fig, ax = plt.subplots()
+        pad = 0.05 * (xmax - xmin)
+        xfit = np.linspace(xmin - pad, xmax + pad, 1000)
+        ax.plot(x, y, "o", label="data")
+        ax.plot(xfit, spline(xfit), "-", label="monotone spline")
+        ax.axvspan(xmin - pad, xmin, color="gray", alpha=0.15)
+        ax.axvspan(xmax, xmax + pad, color="gray", alpha=0.15,
+                   label="extrapolated")
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
+        ax.legend()
+
+    return spline, Fint
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.interpolate import BSpline
+from scipy.optimize import lsq_linear
+
+
+class _LinearTails:
+    """
+    Evaluate a spline inside [xmin, xmax] and continue it as a straight line
+    (value and slope matched at the end point) outside that range.
+
+    order=0: the function itself   -> f(xc) + f'(xc) * dx
+    order=1: its cumulative integral from xmin
+             -> F(xc) + f(xc) * dx + 0.5 * f'(xc) * dx**2
+             (the exact integral of the linearly extrapolated y)
+    """
+
+    def __init__(self, spline, xmin, xmax, order=0):
+        self.xmin, self.xmax = xmin, xmax
+        self.order = order
+        self.spline = spline
+        self.dspline = spline.derivative()
+        self.spline_int = spline.antiderivative()
+        self.offset = self.spline_int(xmin)  # so that F(xmin) = 0
+
+    def __call__(self, x_eval):
+        x = np.asarray(x_eval, dtype=float)
+        xc = np.clip(x, self.xmin, self.xmax)
+        dx = x - xc                                  # zero inside the range
+        y0 = self.spline(xc)
+        slope = np.maximum(self.dspline(xc), 0.0)    # guard against ~-1e-16
+        if self.order == 0:
+            return y0 + slope * dx
+        F0 = self.spline_int(xc) - self.offset
+        return F0 + y0 * dx + 0.5 * slope * dx**2
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.interpolate import BSpline
+from scipy.optimize import lsq_linear
+
+
+class _LinearTails:
+    """
+    Evaluate a spline inside [xmin, xmax] and continue it as a straight line
+    (value and slope matched at the end point) outside that range. Prints a
+    message to the console whenever a call involves extrapolation.
+
+    order=0: the function itself   -> f(xc) + f'(xc) * dx
+    order=1: its cumulative integral from xmin
+             -> F(xc) + f(xc) * dx + 0.5 * f'(xc) * dx**2
+             (the exact integral of the linearly extrapolated y)
+    """
+
+    def __init__(self, spline, xmin, xmax, order=0, name="function",
+                 notify=True):
+        self.xmin, self.xmax = xmin, xmax
+        self.order = order
+        self.name = name
+        self.notify = notify
+        self.spline = spline
+        self.dspline = spline.derivative()
+        self.spline_int = spline.antiderivative()
+        self.offset = self.spline_int(xmin)  # so that F(xmin) = 0
+
+    def _report(self, x):
+        below = x < self.xmin
+        above = x > self.xmax
+        if not (np.any(below) or np.any(above)):
+            return
+        parts = []
+        if np.any(below):
+            parts.append(f"{below.sum()} point(s) below xmin "
+                         f"(lowest requested x = {x[below].min():.6g})")
+        if np.any(above):
+            parts.append(f"{above.sum()} point(s) above xmax "
+                         f"(highest requested x = {x[above].max():.6g})")
+        print(f"{self.name} is extrapolating (linear continuation) outside "
+              f"the data range [{self.xmin:.6g}, {self.xmax:.6g}]: "
+              + "; ".join(parts))
+
+    def __call__(self, x_eval):
+        x = np.asarray(x_eval, dtype=float)
+        if self.notify:
+            self._report(np.atleast_1d(x))
+        xc = np.clip(x, self.xmin, self.xmax)
+        dx = x - xc                                  # zero inside the range
+        y0 = self.spline(xc)
+        slope = np.maximum(self.dspline(xc), 0.0)    # guard against ~-1e-16
+        if self.order == 0:
+            return y0 + slope * dx
+        F0 = self.spline_int(xc) - self.offset
+        return F0 + y0 * dx + 0.5 * slope * dx**2
+
+
+def cumulative_integral_spline(
+    xdata,
+    ydata,
+    plot=True,
+    n_knots=3,
+    lam=0.0,
+    spline_k=3,
+    notify_extrapolation=True,
+):
+    """
+    Fit a monotonically increasing smoothing spline to noisy y(x) and return
+    the spline and a callable cumulative integral. Outside the data range both
+    continue linearly (matching value and slope at the end points), so the
+    extrapolation is also monotonically increasing. A message is printed to
+    the console whenever either function is evaluated outside the data range.
+
+    Parameters
+    ----------
+    xdata, ydata : array-like
+        Data (x need not be pre-sorted).
+    plot : bool, optional
+        If True (default), plot the data and spline fit.
+    n_knots : int, optional
+        Number of interior knots. Fewer knots = smoother fit.
+    lam : float, optional
+        Roughness penalty on the coefficients (second differences).
+        Increase for a smoother curve; 0 means no penalty.
+    spline_k : int, optional
+        Spline order (default 3 = cubic).
+    notify_extrapolation : bool, optional
+        If True (default), print a message when extrapolating.
+
+    Returns
+    -------
+    spline : callable
+        Monotone fit to y(x). The underlying BSpline (no linear tails) is
+        available as spline.spline.
+    Fint : callable
+        F(x) = integral of y dx from xmin to x, consistent with the
+        extrapolated spline.
+    """
+    x = np.asarray(xdata, dtype=float)
+    y = np.asarray(ydata, dtype=float)
+
+    order = np.argsort(x)
+    x = x[order]
+    y = y[order]
+    xmin, xmax = x.min(), x.max()
+
+    # Clamped knot vector with interior knots at data quantiles
+    interior = np.quantile(x, np.linspace(0, 1, n_knots + 2)[1:-1])
+    t = np.r_[[xmin] * (spline_k + 1), interior, [xmax] * (spline_k + 1)]
+    n_coef = len(t) - spline_k - 1
+
+    # Design matrix: B[i, j] = j-th basis function evaluated at x[i]
+    B = BSpline.design_matrix(x, t, spline_k).toarray()
+
+    # Reparameterize coefficients: c = L @ p, with p[0] free and p[1:] >= 0.
+    # Then c is non-decreasing, which guarantees a non-decreasing spline
+    # inside the data range.
+    L = np.tril(np.ones((n_coef, n_coef)))
+    A = B @ L
+    rhs = y
+
+    if lam > 0:
+        D2 = np.diff(np.eye(n_coef), 2, axis=0)   # second-difference operator
+        A = np.vstack([A, np.sqrt(lam) * (D2 @ L)])
+        rhs = np.r_[y, np.zeros(D2.shape[0])]
+
+    lb = np.r_[-np.inf, np.zeros(n_coef - 1)]
+    ub = np.full(n_coef, np.inf)
+    res = lsq_linear(A, rhs, bounds=(lb, ub))
+
+    c = L @ res.x
+    spline_fit = BSpline(t, c, spline_k, extrapolate=True)
+
+    # Wrap with linear tails so extrapolation stays monotone
+    spline = _LinearTails(spline_fit, xmin, xmax, order=0,
+                          name="spline", notify=notify_extrapolation)
+    Fint = _LinearTails(spline_fit, xmin, xmax, order=1,
+                        name="Fint", notify=notify_extrapolation)
+
+    if plot:
+        # Plot the extrapolated margin without triggering console messages
+        spline.notify = False
+        fig, ax = plt.subplots()
+        pad = 0.05 * (xmax - xmin)
+        xfit = np.linspace(xmin - pad, xmax + pad, 1000)
+        ax.plot(x, y, "o", label="data")
+        ax.plot(xfit, spline(xfit), "-", label="monotone spline")
+        ax.axvspan(xmin - pad, xmin, color="gray", alpha=0.15)
+        ax.axvspan(xmax, xmax + pad, color="gray", alpha=0.15,
+                   label="extrapolated (linear)")
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
+        ax.legend()
+        spline.notify = notify_extrapolation
 
     return spline, Fint
