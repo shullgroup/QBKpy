@@ -58,7 +58,7 @@ col = {1:'C0', 3:'C1', 5:'C2', 7:'C3', 9:'C4'}
 
 # setvvalues for standard constants
 Zq = 8.84e6  # shear acoustic impedance of at cut quartz
-f1_default = 5e6  # fundamental r_defaault_defaaultesonant frequency
+f1_default = 5e6  # fundamental resonant frequency
 e26 = 9.65e-2
 
 # Half bandwidth of unloaed resonator (intrinsic dissipation on crystalline quartz)
@@ -3096,7 +3096,7 @@ def read_xlsx(infile, **kwargs):
             - default is 'all', which takes everything
             - 'max' means we take the single value for which f3 is maximized
             - 'last' means the last index (highest value)
-            - 'first' means we take only the first index (highest value)
+            - 'first' means we take only the first index (lowest value)
 
     film_idx: numpy array of integers or string
         Index values to include for film data.  Default is 'all' which 
@@ -3122,7 +3122,9 @@ def read_xlsx(infile, **kwargs):
 
     Tref : float
         Temperature at which reference frequency shift was determined.
-        Default is 22C.
+        If given, this value is always used.  If not given, a single
+        reference point uses its own temperature, and 22C is used when
+        the file has no reference temperatures.
             
     autodelete : Boolean
         True (default) if we want delete points at temperatures where
@@ -3160,7 +3162,9 @@ def read_xlsx(infile, **kwargs):
     ref_idx=kwargs.get('ref_idx', 'all')
     T_coef_plots=kwargs.get('T_coef_plots', True)
     nvals_in=kwargs.get('nvals', [1, 3, 5, 7, 9])
-    Tref=kwargs.get('Tref', 22)
+    # Tref_in is None unless Tref was passed explicitly
+    Tref_in=kwargs.get('Tref', None)
+    Tref=22 if Tref_in is None else Tref_in
     autodelete = kwargs.get('autodelete', True)
     index_col = kwargs.get('index_col', 0)
     
@@ -3260,6 +3264,13 @@ def read_xlsx(infile, **kwargs):
         if T_coef == 'calculated':
             T_coef = fit_T_coef(df_ref, nvals, ['f', 'g'])
 
+        # temperature where the reference curve is pinned to the measured
+        # reference values: Tref if passed, otherwise the temperature of
+        # a single reference point if it has one, otherwise 22
+        T_anchor = Tref
+        if (Tref_in is None and len(df_ref) == 1 and
+                pd.notna(df_ref['temp'].iloc[0])):
+            T_anchor = df_ref['temp'].iloc[0]
 
         for n in nvals:
             # check to see if the specified harmonic exists
@@ -3277,7 +3288,8 @@ def read_xlsx(infile, **kwargs):
                         # check to make sure its okay to average
                         print('averaging ref. vals over non-constant temp.')
                     avg = df_ref[val+str(n)].mean()
-                    T_coef[val][n][3] = avg - np.polyval(T_coef[val][n],Tref)
+                    T_coef[val][n][3] = avg - np.polyval(T_coef[val][n],
+                                                         T_anchor)
                 # add absolute frequency and reference values to dataframe
                 keep_column.append(val+str(n)+'_dat')
                 keep_column.append(val+str(n)+'_ref')
