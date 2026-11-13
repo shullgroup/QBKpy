@@ -3090,7 +3090,7 @@ def read_xlsx(infile, **kwargs):
         - 'self':  read delf and delg read directly from the data channel   
 
 
-    ref_idx : numpy array of integers
+    ref_idx : integer, list or numpy array of integers, or string
         Index values to include in reference determination.
             
             - default is 'all', which takes everything
@@ -3128,14 +3128,16 @@ def read_xlsx(infile, **kwargs):
             
     autodelete : Boolean
         True (default) if we want delete points at temperatures where
-        we don't have a reference point'
+        we don't have a reference point.  Ignored (no points deleted)
+        when the reference data have only one temperature.
 
     T_coef_plots : Boolean  
         True (default) to plot temp. dependent f and g for ref.  
 
     f_ref_shift : dictionary
-        Shifts added to reference values.  
-        Default is {1:0, 3:0, 5:0, 7:0, 9:0}.
+        Shifts (Hz) added to the reference frequencies, keyed by harmonic,
+        so each delf is reduced by the shift.  The old name 'fref_shift'
+        is also accepted.  Default is {1:0, 3:0, 5:0, 7:0, 9:0}.
 
     nvals : list of integers 
         Harmonics to include.  Default is [1, 3, 5, 7, 9].
@@ -3173,11 +3175,18 @@ def read_xlsx(infile, **kwargs):
     T_coef = kwargs.get('T_coef', 'calculated')
     if T_coef == 'default':
         T_coef = deepcopy(T_coef_default)
+    elif isinstance(T_coef, dict):
+        # copy so that the caller's dictionary is not modified below
+        T_coef = deepcopy(T_coef)
 
     # read shifts that account for changes from stress levels applied
-    # to different sample holders
-    f_ref_shift=kwargs.get('fref_shift', {1: 0, 3: 0, 5: 0, 7:0, 9:0})
-    
+    # to different sample holders ('fref_shift' accepted for old scripts)
+    f_ref_shift=kwargs.get('f_ref_shift', kwargs.get('fref_shift',
+                           {1: 0, 3: 0, 5: 0, 7:0, 9:0}))
+
+    # allow a single index value as well as a list or array
+    if type(ref_idx) != str:
+        ref_idx = np.atleast_1d(ref_idx)
 
     if type(ref_idx)==str and ref_idx == 'max':
         df_ref=pd.read_excel(infile, sheet_name=ref_channel, header=0)
@@ -3240,8 +3249,8 @@ def read_xlsx(infile, **kwargs):
         # the .xlsx file.  All we need to do is read the values and return them
         for n in nvals:
             df[f'delfstar_expt_{n}']=(df[f'delf{n}'].round(1) 
-                                      + 1j*df[f'delg{n}'].round(1) - 
-                                      f_ref_shift[n].round(1))
+                                      + 1j*df[f'delg{n}'].round(1) -
+                                      round(f_ref_shift[n], 1))
             df[f'delfstar_ref_{n}']='self'
             df[f'delfstar_dat_{n}']='self'
         return df [keep_column].copy()
@@ -3277,7 +3286,8 @@ def read_xlsx(infile, **kwargs):
             if 'f'+str(n) not in df_ref.keys():
                 continue
             
-            # apply fref_shift if needed
+            # add f_ref_shift to the reference frequency; it then carries
+            # through to fref below, so it is not subtracted again
             df_ref['f'+str(n)] = df_ref['f'+str(n)] + f_ref_shift[n]
  
             for val in ['f', 'g']:  
@@ -3306,7 +3316,7 @@ def read_xlsx(infile, **kwargs):
             gref = np.polyval(T_coef['g'][n], df['temp']).round(1)
             df[f'fstar_{n}_ref'] = (fref + 1j*gref)
             df[f'delfstar_expt_{n}']=(df[f'fstar_{n}_dat'].round(1) -
-                          df[f'fstar_{n}_ref'].round(1) - f_ref_shift[n])
+                          df[f'fstar_{n}_ref'].round(1))
             keep_column.append(f'fstar_{n}_dat')
             keep_column.append(f'fstar_{n}_ref')
          
@@ -3328,7 +3338,12 @@ def read_xlsx(infile, **kwargs):
     if T_coef_plots:
         plot_bare_tempshift(df_ref, T_coef, Tref, nvals, T_range)
         
-    if (autodelete and 
+    # a single reference temperature gives no range to compare against,
+    # so autodelete would remove every film point at any other temperature
+    if df_ref['temp'].nunique() <= 1:
+        autodelete = False
+
+    if (autodelete and
         (T_range[0] < T_ref_range[0] or T_range[1] > T_ref_range[1])):
         df_tmp = df.query('temp >= @T_ref_range[0] & temp <= @T_ref_range[1]')
         # determine number of deleted points
@@ -3357,7 +3372,8 @@ def fit_T_coef(df, nvals, varvals):
     temp=df['temp']
     if len(temp.unique())<5:
         print('using default T_coef values')
-        return T_coef_default
+        # copy so that callers can't modify the module-level defaults
+        return deepcopy(T_coef_default)
     
     for n in nvals:
         for var in varvals:
